@@ -152,6 +152,14 @@ class MemoryTrajectoryCapture:
         sample_rate: int = 100,  # Capture every N batches
         max_history: int = 10,   # Keep last N trajectory snapshots
     ):
+        """
+        Initialize memory trajectory capture.
+
+        Args:
+            output_dir: Directory for saving trajectory data.
+            sample_rate: Capture metrics every N batches.
+            max_history: Maximum number of trajectory snapshots to retain in memory.
+        """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.sample_rate = sample_rate
@@ -162,7 +170,12 @@ class MemoryTrajectoryCapture:
         self.step_count = 0
 
     def should_capture(self) -> bool:
-        """Check if we should capture this step."""
+        """
+        Check if we should capture metrics at this step.
+
+        Returns:
+            True if current step is a capture point based on sample_rate.
+        """
         return self.step_count % self.sample_rate == 0
 
     def capture(
@@ -232,7 +245,13 @@ class MemoryTrajectoryCapture:
         return snapshot
 
     def save(self, epoch: int, batch: int):
-        """Save trajectories to file."""
+        """
+        Save trajectories to file and clear buffer.
+
+        Args:
+            epoch: Current training epoch.
+            batch: Current batch number within epoch.
+        """
         if not self.trajectories:
             return
 
@@ -244,7 +263,12 @@ class MemoryTrajectoryCapture:
         self.trajectories = []
 
     def get_summary(self) -> Dict[str, Any]:
-        """Get summary of captured trajectories."""
+        """
+        Get summary of captured trajectories.
+
+        Returns:
+            Dictionary containing snapshot count, step list, and effective rank statistics.
+        """
         if not self.trajectories:
             return {}
 
@@ -283,6 +307,14 @@ class AttentionGeometryTracker:
         sample_rate: int = 100,
         num_heads_to_track: int = 4,  # Track subset of heads
     ):
+        """
+        Initialize attention geometry tracker.
+
+        Args:
+            output_dir: Directory for saving attention geometry data.
+            sample_rate: Capture metrics every N steps.
+            num_heads_to_track: Number of attention heads to analyze (subset for efficiency).
+        """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.sample_rate = sample_rate
@@ -292,6 +324,12 @@ class AttentionGeometryTracker:
         self.step_count = 0
 
     def should_capture(self) -> bool:
+        """
+        Check if we should capture at this step.
+
+        Returns:
+            True if current step is a capture point based on sample_rate.
+        """
         return self.step_count % self.sample_rate == 0
 
     def capture(
@@ -376,7 +414,13 @@ class AttentionGeometryTracker:
         return snapshot
 
     def save(self, epoch: int, batch: int):
-        """Save captures to file."""
+        """
+        Save attention geometry captures to file and clear buffer.
+
+        Args:
+            epoch: Current training epoch.
+            batch: Current batch number within epoch.
+        """
         if not self.captures:
             return
 
@@ -387,7 +431,12 @@ class AttentionGeometryTracker:
         self.captures = []
 
     def get_summary(self) -> Dict[str, Any]:
-        """Get summary of attention geometry."""
+        """
+        Get summary of attention geometry metrics.
+
+        Returns:
+            Dictionary containing capture count, mean entropy, and mean effective rank.
+        """
         if not self.captures:
             return {}
 
@@ -422,6 +471,14 @@ class ManifoldEvolutionMonitor:
         sample_rate: int = 100,
         variance_threshold: float = 0.9,  # For D_eff computation
     ):
+        """
+        Initialize manifold evolution monitor.
+
+        Args:
+            output_dir: Directory for saving manifold evolution data.
+            sample_rate: Capture metrics every N steps.
+            variance_threshold: Variance threshold for effective dimensionality (D_eff).
+        """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.sample_rate = sample_rate
@@ -431,6 +488,12 @@ class ManifoldEvolutionMonitor:
         self.step_count = 0
 
     def should_capture(self) -> bool:
+        """
+        Check if we should capture at this step.
+
+        Returns:
+            True if current step is a capture point based on sample_rate.
+        """
         return self.step_count % self.sample_rate == 0
 
     def capture(
@@ -503,7 +566,13 @@ class ManifoldEvolutionMonitor:
         return snapshot
 
     def save(self, epoch: int, batch: int):
-        """Save manifold evolution to file."""
+        """
+        Save manifold evolution data to file and clear buffer.
+
+        Args:
+            epoch: Current training epoch.
+            batch: Current batch number within epoch.
+        """
         if not self.layer_metrics:
             return
 
@@ -514,7 +583,12 @@ class ManifoldEvolutionMonitor:
         self.layer_metrics = []
 
     def get_summary(self) -> Dict[str, Any]:
-        """Get summary of manifold evolution."""
+        """
+        Get summary of manifold evolution metrics.
+
+        Returns:
+            Dictionary containing capture count, mean D_eff preservation, and mean min D_eff.
+        """
         if not self.layer_metrics:
             return {}
 
@@ -543,6 +617,13 @@ class OmegaQualityMeasure:
         output_dir: Path,
         sample_rate: int = 100,
     ):
+        """
+        Initialize omega rule quality measurement.
+
+        Args:
+            output_dir: Directory for saving omega quality metrics.
+            sample_rate: Capture metrics every N steps.
+        """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.sample_rate = sample_rate
@@ -551,6 +632,12 @@ class OmegaQualityMeasure:
         self.step_count = 0
 
     def should_capture(self) -> bool:
+        """
+        Check if we should capture at this step.
+
+        Returns:
+            True if current step is a capture point based on sample_rate.
+        """
         return self.step_count % self.sample_rate == 0
 
     def capture(
@@ -636,7 +723,13 @@ class OmegaQualityMeasure:
         return snapshot
 
     def save(self, epoch: int, batch: int):
-        """Save quality metrics to file."""
+        """
+        Save omega quality metrics to file and clear buffer.
+
+        Args:
+            epoch: Current training epoch.
+            batch: Current batch number within epoch.
+        """
         if not self.quality_metrics:
             return
 
@@ -647,7 +740,12 @@ class OmegaQualityMeasure:
         self.quality_metrics = []
 
     def get_summary(self) -> Dict[str, Any]:
-        """Get summary of omega quality."""
+        """
+        Get summary of omega quality metrics.
+
+        Returns:
+            Dictionary containing capture count, mean reconstruction MSE, and mean cosine similarity.
+        """
         if not self.quality_metrics:
             return {}
 
@@ -675,6 +773,14 @@ class WeaverSpaceMetrics:
         sample_rate: int = 100,
         enabled: bool = True,
     ):
+        """
+        Initialize weaver space metrics orchestrator.
+
+        Args:
+            output_dir: Base directory for all weaver space metric outputs.
+            sample_rate: Capture metrics every N steps.
+            enabled: Whether metrics collection is active.
+        """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.sample_rate = sample_rate
@@ -740,7 +846,11 @@ class WeaverSpaceMetrics:
                 self._hooks.append(hook)
 
     def remove_hooks(self):
-        """Remove all registered hooks."""
+        """
+        Remove all registered forward hooks from the model.
+
+        Should be called when metrics collection is complete to clean up.
+        """
         for hook in self._hooks:
             hook.remove()
         self._hooks = []
@@ -814,7 +924,12 @@ class WeaverSpaceMetrics:
         return metrics
 
     def save_checkpoint(self, batch: int):
-        """Save all accumulated metrics."""
+        """
+        Save all accumulated metrics from all trackers.
+
+        Args:
+            batch: Current batch number for checkpoint naming.
+        """
         if not self.enabled:
             return
 
@@ -824,7 +939,12 @@ class WeaverSpaceMetrics:
         self.omega_quality.save(self.current_epoch, batch)
 
     def get_summary(self) -> Dict[str, Any]:
-        """Get summary of all metrics."""
+        """
+        Get summary of all weaver space metrics.
+
+        Returns:
+            Dictionary with summaries from memory, attention, manifold, and omega trackers.
+        """
         return {
             "memory": self.memory_tracker.get_summary(),
             "attention": self.attention_tracker.get_summary(),
@@ -833,7 +953,15 @@ class WeaverSpaceMetrics:
         }
 
     def log_to_jsonl(self, filepath: str = None) -> str:
-        """Write summary to JSONL file for dashboard."""
+        """
+        Write summary to JSONL file for dashboard consumption.
+
+        Args:
+            filepath: Output file path. Defaults to weaver_summary.jsonl in output_dir.
+
+        Returns:
+            Path to the written file.
+        """
         if filepath is None:
             filepath = self.output_dir / "weaver_summary.jsonl"
 

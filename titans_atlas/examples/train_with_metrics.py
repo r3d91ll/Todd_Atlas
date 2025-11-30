@@ -48,9 +48,20 @@ from titans_atlas.metrics.weaver_space import WeaverSpaceMetrics
 
 
 class TokenizedDataset(Dataset):
-    """Dataset for pre-tokenized data stored as memory-mapped numpy array."""
+    """
+    Dataset for pre-tokenized data stored as memory-mapped numpy array.
+
+    Reads from a binary file (train.bin) containing uint16 token IDs.
+    """
 
     def __init__(self, data_path: str, seq_length: int):
+        """
+        Initialize tokenized dataset.
+
+        Args:
+            data_path: Path to directory containing train.bin file.
+            seq_length: Sequence length for each sample.
+        """
         self.seq_length = seq_length
         self.data_path = Path(data_path)
 
@@ -65,9 +76,19 @@ class TokenizedDataset(Dataset):
             raise FileNotFoundError(f"Data file not found: {data_file}")
 
     def __len__(self) -> int:
+        """Return number of samples in dataset."""
         return self.num_tokens // self.seq_length
 
     def __getitem__(self, idx: int):
+        """
+        Get a sample by index.
+
+        Args:
+            idx: Sample index.
+
+        Returns:
+            Dict with input_ids and labels tensors.
+        """
         start = idx * self.seq_length
         end = start + self.seq_length + 1
         tokens = torch.from_numpy(self.data[start:end].astype('int64'))
@@ -78,17 +99,39 @@ class TokenizedDataset(Dataset):
 
 
 class SyntheticDataset(Dataset):
-    """Synthetic dataset with random tokens for throughput testing."""
+    """
+    Synthetic dataset with random tokens for throughput testing.
+
+    Generates random token sequences on-the-fly without requiring data files.
+    """
 
     def __init__(self, vocab_size: int, seq_length: int, num_samples: int = 10000):
+        """
+        Initialize synthetic dataset.
+
+        Args:
+            vocab_size: Size of vocabulary for random token generation.
+            seq_length: Sequence length for each sample.
+            num_samples: Number of samples in the dataset.
+        """
         self.vocab_size = vocab_size
         self.seq_length = seq_length
         self.num_samples = num_samples
 
     def __len__(self) -> int:
+        """Return number of samples in dataset."""
         return self.num_samples
 
     def __getitem__(self, idx: int):
+        """
+        Get a random sample by index.
+
+        Args:
+            idx: Sample index (ignored, generates random data).
+
+        Returns:
+            Dict with random input_ids and labels tensors.
+        """
         tokens = torch.randint(0, self.vocab_size, (self.seq_length + 1,))
         return {
             "input_ids": tokens[:-1],
@@ -111,7 +154,15 @@ def get_lr(step: int, warmup_steps: int, max_steps: int, max_lr: float, min_lr: 
 
 
 def count_parameters(model: nn.Module) -> int:
-    """Count trainable parameters."""
+    """
+    Count trainable parameters in model.
+
+    Args:
+        model: PyTorch model.
+
+    Returns:
+        Total number of trainable parameters.
+    """
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 

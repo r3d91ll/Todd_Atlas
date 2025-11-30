@@ -37,7 +37,26 @@ def _convert_numpy_types(obj: Any) -> Any:
 
 @dataclass
 class ConvergenceState:
-    """Current convergence state."""
+    """
+    Current convergence state tracking loss, perplexity, gradient health, and convergence indicators.
+
+    Attributes:
+        current_loss: Most recent loss value.
+        best_loss: Best (lowest) loss seen during training.
+        smoothed_loss: Exponentially smoothed loss value.
+        loss_trend: Slope of loss trend (negative = improving).
+        perplexity: Current perplexity (exp of loss).
+        smoothed_perplexity: Exponentially smoothed perplexity.
+        grad_norm: Current gradient norm.
+        grad_norm_smoothed: Exponentially smoothed gradient norm.
+        grad_variance: Variance of gradient norms over sliding window.
+        steps_since_improvement: Steps since best loss was updated.
+        convergence_score: Overall convergence score (0-1, higher = more converged).
+        is_converging: Whether loss is actively decreasing.
+        is_plateaued: Whether training has plateaued.
+        learning_rate: Current learning rate.
+        effective_lr: Learning rate * gradient norm approximation.
+    """
 
     # Loss tracking
     current_loss: float = float("inf")
@@ -67,30 +86,60 @@ class ConvergenceState:
 
 @dataclass
 class LossWindow:
-    """Sliding window for loss statistics."""
+    """
+    Sliding window for loss statistics with trend analysis.
+
+    Attributes:
+        window_size: Maximum number of values to retain.
+        values: Deque containing recent loss values.
+    """
 
     window_size: int = 100
     values: deque = field(default_factory=deque)
 
     def __post_init__(self):
+        """Initialize deque with correct maxlen based on window_size."""
         # Recreate deque with correct maxlen from window_size
         self.values = deque(self.values, maxlen=self.window_size)
 
     def add(self, value: float):
+        """
+        Add a value to the sliding window.
+
+        Args:
+            value: Loss value to add.
+        """
         self.values.append(value)
 
     def mean(self) -> float:
+        """
+        Compute mean of values in window.
+
+        Returns:
+            Mean loss, or infinity if window is empty.
+        """
         if not self.values:
             return float("inf")
         return np.mean(list(self.values))
 
     def std(self) -> float:
+        """
+        Compute standard deviation of values in window.
+
+        Returns:
+            Standard deviation, or 0 if fewer than 2 values.
+        """
         if len(self.values) < 2:
             return 0.0
         return np.std(list(self.values))
 
     def trend(self) -> float:
-        """Compute trend (slope of linear fit). Negative = decreasing."""
+        """
+        Compute trend (slope of linear fit). Negative = decreasing.
+
+        Returns:
+            Slope of linear regression fit to values.
+        """
         if len(self.values) < 10:
             return 0.0
 
@@ -110,12 +159,26 @@ class LossWindow:
         return numerator / denominator
 
     def min(self) -> float:
+        """
+        Get minimum value in window.
+
+        Returns:
+            Minimum loss value, or infinity if window is empty.
+        """
         if not self.values:
             return float("inf")
         return min(self.values)
 
     def is_plateau(self, threshold: float = 0.01) -> bool:
-        """Check if loss has plateaued (low variance, near-zero trend)."""
+        """
+        Check if loss has plateaued (low variance, near-zero trend).
+
+        Args:
+            threshold: Maximum variance and trend magnitude to consider as plateau.
+
+        Returns:
+            True if loss appears to have plateaued.
+        """
         if len(self.values) < 50:
             return False
 
@@ -162,6 +225,15 @@ class ConvergenceMetrics:
         window_size: int = 100,  # Rolling window size
         patience: int = 500,  # Steps without improvement before plateau
     ):
+        """
+        Initialize convergence metrics tracker.
+
+        Args:
+            output_dir: Directory for saving metric outputs.
+            ema_alpha: Exponential moving average smoothing factor (0-1, higher = more responsive).
+            window_size: Size of rolling window for trend analysis.
+            patience: Steps without improvement before declaring plateau.
+        """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -354,7 +426,15 @@ class ConvergenceMetrics:
             self.state.convergence_score = 0.0
 
     def log_to_jsonl(self, filepath: str = None) -> str:
-        """Write metrics to JSONL file for dashboard consumption."""
+        """
+        Write metrics to JSONL file for dashboard consumption.
+
+        Args:
+            filepath: Output file path. Defaults to metrics.jsonl in output_dir.
+
+        Returns:
+            Path to the written file.
+        """
         if filepath is None:
             filepath = self.output_dir / "metrics.jsonl"
 
@@ -370,7 +450,12 @@ class ConvergenceMetrics:
         return str(filepath)
 
     def save_full_history(self, filepath: str = None):
-        """Save complete history to JSON file."""
+        """
+        Save complete history to JSON file.
+
+        Args:
+            filepath: Output file path. Defaults to full_history.json in output_dir.
+        """
         if filepath is None:
             filepath = self.output_dir / "full_history.json"
 
@@ -378,7 +463,12 @@ class ConvergenceMetrics:
             json.dump(_convert_numpy_types(self.history), f, indent=2)
 
     def get_summary(self) -> Dict[str, Any]:
-        """Get summary statistics."""
+        """
+        Get summary statistics of training convergence.
+
+        Returns:
+            Dictionary with total steps, loss statistics, perplexity, and convergence indicators.
+        """
         if not self.history:
             return {}
 
@@ -433,7 +523,12 @@ class ConvergenceMetrics:
         return False, ""
 
     def get_dashboard_metrics(self) -> Dict[str, Any]:
-        """Get metrics formatted for dashboard display."""
+        """
+        Get metrics formatted for dashboard display.
+
+        Returns:
+            Dictionary with current step, loss, perplexity, gradient, convergence, and learning rate info.
+        """
         return {
             "step": self.step_count,
             "loss": {
@@ -470,12 +565,24 @@ class GradientMonitor:
     """
 
     def __init__(self, model: torch.nn.Module):
+        """
+        Initialize gradient monitor for a model.
+
+        Args:
+            model: PyTorch model to monitor gradients for.
+        """
         self.model = model
         self.layer_norms: Dict[str, List[float]] = {}
         self.layer_stats: Dict[str, Dict[str, float]] = {}
 
     def compute_gradient_stats(self) -> Dict[str, Any]:
-        """Compute gradient statistics for all parameters."""
+        """
+        Compute gradient statistics for all parameters.
+
+        Returns:
+            Dictionary containing global norm, per-layer stats, and warnings for
+            vanishing/exploding/sparse gradients.
+        """
         stats = {
             "global_norm": 0.0,
             "per_layer": {},
@@ -521,7 +628,12 @@ class GradientMonitor:
         return stats
 
     def get_layer_norm_trends(self) -> Dict[str, Dict[str, float]]:
-        """Get gradient norm trends per layer."""
+        """
+        Get gradient norm trends per layer.
+
+        Returns:
+            Dictionary mapping layer names to trend statistics (mean, std, trend slope).
+        """
         trends = {}
         for name, norms in self.layer_norms.items():
             if len(norms) > 10:

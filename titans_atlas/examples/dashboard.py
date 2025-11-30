@@ -41,7 +41,16 @@ except ImportError:
 
 
 def load_jsonl(filepath: Path, max_lines: int = 10000) -> List[Dict]:
-    """Load JSONL file, returning list of dicts."""
+    """
+    Load JSONL file, returning list of dicts.
+
+    Args:
+        filepath: Path to JSONL file.
+        max_lines: Maximum number of lines to read.
+
+    Returns:
+        List of parsed JSON records.
+    """
     if not filepath.exists():
         return []
 
@@ -64,7 +73,15 @@ def load_jsonl(filepath: Path, max_lines: int = 10000) -> List[Dict]:
 
 
 def load_metrics(run_dir: Path) -> Dict[str, Any]:
-    """Load all metrics from run directory."""
+    """
+    Load all metrics from run directory.
+
+    Args:
+        run_dir: Path to training run directory.
+
+    Returns:
+        Dictionary containing convergence metrics, weaver metrics, and config.
+    """
     metrics = {
         "convergence": [],
         "weaver": [],
@@ -89,7 +106,15 @@ def load_metrics(run_dir: Path) -> Dict[str, Any]:
 
 
 def create_loss_figure(convergence_data: List[Dict]) -> go.Figure:
-    """Create loss over time plot."""
+    """
+    Create loss over time plot with raw, smoothed, and best loss lines.
+
+    Args:
+        convergence_data: List of convergence metric records.
+
+    Returns:
+        Plotly figure with loss visualization.
+    """
     if not convergence_data:
         return go.Figure()
 
@@ -131,7 +156,15 @@ def create_loss_figure(convergence_data: List[Dict]) -> go.Figure:
 
 
 def create_perplexity_figure(convergence_data: List[Dict]) -> go.Figure:
-    """Create perplexity over time plot."""
+    """
+    Create perplexity over time plot (log scale).
+
+    Args:
+        convergence_data: List of convergence metric records.
+
+    Returns:
+        Plotly figure with perplexity visualization.
+    """
     if not convergence_data:
         return go.Figure()
 
@@ -166,7 +199,15 @@ def create_perplexity_figure(convergence_data: List[Dict]) -> go.Figure:
 
 
 def create_gradient_figure(convergence_data: List[Dict]) -> go.Figure:
-    """Create gradient norm over time plot."""
+    """
+    Create gradient norm over time plot.
+
+    Args:
+        convergence_data: List of convergence metric records.
+
+    Returns:
+        Plotly figure with gradient norm visualization.
+    """
     if not convergence_data:
         return go.Figure()
 
@@ -200,7 +241,15 @@ def create_gradient_figure(convergence_data: List[Dict]) -> go.Figure:
 
 
 def create_convergence_figure(convergence_data: List[Dict]) -> go.Figure:
-    """Create convergence score over time plot."""
+    """
+    Create convergence score over time plot with threshold lines.
+
+    Args:
+        convergence_data: List of convergence metric records.
+
+    Returns:
+        Plotly figure with convergence score (0-1) and threshold indicators.
+    """
     if not convergence_data:
         return go.Figure()
 
@@ -233,7 +282,15 @@ def create_convergence_figure(convergence_data: List[Dict]) -> go.Figure:
 
 
 def create_lr_figure(convergence_data: List[Dict]) -> go.Figure:
-    """Create learning rate schedule plot."""
+    """
+    Create learning rate schedule plot.
+
+    Args:
+        convergence_data: List of convergence metric records.
+
+    Returns:
+        Plotly figure with learning rate over time.
+    """
     if not convergence_data:
         return go.Figure()
 
@@ -259,7 +316,12 @@ def create_lr_figure(convergence_data: List[Dict]) -> go.Figure:
 
 
 def run_streamlit_dashboard(run_dir: Path):
-    """Run Streamlit dashboard."""
+    """
+    Run Streamlit dashboard for real-time training monitoring.
+
+    Args:
+        run_dir: Path to training run directory containing metrics files.
+    """
     st.set_page_config(
         page_title="Atlas Training Dashboard",
         page_icon="🔮",
@@ -346,7 +408,13 @@ def run_streamlit_dashboard(run_dir: Path):
 
 
 def run_dash_dashboard(run_dir: Path, port: int = 8050):
-    """Run Dash dashboard (alternative to Streamlit)."""
+    """
+    Run Dash dashboard (alternative to Streamlit).
+
+    Args:
+        run_dir: Path to training run directory containing metrics files.
+        port: Port to run the Dash server on.
+    """
     try:
         from dash import Dash, dcc, html
         from dash.dependencies import Input, Output
