@@ -1,19 +1,18 @@
-# Titans & Atlas: Learning to Memorize at Test Time
+# Atlas: Learning to Optimally Memorize at Test Time
 
-PyTorch implementation of neural long-term memory architectures from:
+PyTorch implementation of the Atlas neural long-term memory architecture from:
 
-1. **Titans**: [Learning to Memorize at Test Time](https://arxiv.org/abs/2501.00663) (arXiv:2501.00663)
-2. **Atlas**: [Learning to Optimally Memorize the Context at Test Time](https://arxiv.org/abs/2505.23735) (arXiv:2505.23735)
+**Atlas**: [Learning to Optimally Memorize the Context at Test Time](https://arxiv.org/abs/2505.23735) (arXiv:2505.23735)
 
 ## Overview
 
-These architectures introduce neural memory modules that learn to memorize context at test time through gradient-based optimization. Key innovations:
+Atlas introduces neural memory modules that learn to memorize context at test time through gradient-based optimization. Key innovations:
 
-- **Surprise Metric**: Gradient-based importance signal with momentum
-- **Memory Update Rule**: `M_t = (1 - α_t) * M_{t-1} + S_t`
+- **Omega Rule**: Sliding window context optimization instead of per-token updates
+- **Polynomial Features**: φ_p(x) expansion for O(d_k^p) capacity scaling
+- **Muon Optimizer**: Second-order approximation for stable memory updates
 - **Deep Memory MLPs**: Superlinear capacity O(d_k * d_v)
-- **Omega Rule** (Atlas): Sliding window context optimization
-- **Polynomial Features** (Atlas): O(d_k^p) capacity scaling
+- **Learnable Taylor Kernel**: Softmax approximation with learnable coefficients
 
 ## Installation
 
@@ -23,32 +22,7 @@ pip install -r requirements.txt
 
 ## Quick Start
 
-### Titans Language Model
-
-```python
-from titans_atlas import TitansLM
-from titans_atlas.configs import TitansConfig
-
-# Create config
-config = TitansConfig(
-    d_model=512,
-    num_layers=12,
-    variant="MAG",  # or "MAC", "MAL"
-    vocab_size=32000,
-)
-
-# Create model
-model = TitansLM(config, variant="MAG")
-
-# Forward pass
-outputs = model(input_ids=tokens, labels=labels)
-loss = outputs["loss"]
-
-# Generation
-generated = model.generate(prompt_tokens, max_new_tokens=100)
-```
-
-### Atlas with Omega Rule
+### Atlas Language Model
 
 ```python
 from titans_atlas import Atlas
@@ -64,43 +38,63 @@ config = AtlasConfig(
 
 model = Atlas(config)
 outputs = model(input_ids=tokens, labels=labels)
+loss = outputs["loss"]
+
+# Generation
+generated = model.generate(prompt_tokens, max_new_tokens=100)
 ```
 
-## Architecture Variants
-
-### Titans Variants
-
-| Variant | Description | Best For |
-|---------|-------------|----------|
-| **MAC** (Memory as Context) | Memory provides additional context for attention | Complex reasoning |
-| **MAG** (Memory as Gating) | Parallel branches combined via gating | Efficiency |
-| **MAL** (Memory as Layer) | Sequential memory → attention | Long sequences |
-
-### Atlas Enhancements
-
-- **Omega Rule**: Optimizes memory over sliding window instead of per-token
-- **Polynomial Features**: φ_p(x) expansion for increased capacity
-- **Muon Optimizer**: Second-order approximation for stable memory updates
-- **Taylor Kernel**: Learnable softmax approximation
-
-## Key Components
-
-### Neural Memory Module
+### DeepTransformer Backbone
 
 ```python
-from titans_atlas.layers import NeuralMemory
+from titans_atlas import DeepTransformer
+from titans_atlas.configs import AtlasConfig
 
-memory = NeuralMemory(
+config = AtlasConfig(
     d_model=512,
-    d_key=64,
-    d_value=64,
-    num_memory_layers=2,
-    use_momentum=True,
-    use_forget_gate=True,
+    num_layers=12,
+    context_window=64,
+    polynomial_degree=2,
 )
 
-output, new_state = memory(x, memory_state=prev_state)
+model = DeepTransformer(config)
+output, memory_states = model(x)  # x: (batch, seq_len, d_model)
 ```
+
+## Architecture
+
+### Core Components
+
+| Component | Description |
+|-----------|-------------|
+| **OmegaRule** | Sliding window optimization: min_M Σ γ_i · ℓ(M; k_i, v_i) |
+| **PolynomialFeatures** | φ_p(x) = [x^β]_{|β|≤p} for capacity scaling |
+| **MuonOptimizer** | Momentum + spectral normalization for memory updates |
+| **DeepMemory** | Multi-layer MLP with O(d_k * d_v) capacity |
+| **LearnableTaylorKernel** | exp(x) ≈ Σ a_i x^i approximation |
+
+### Atlas Memory Update
+
+The Omega rule optimizes memory over a sliding window:
+
+```
+min_M Σ_{i=t-c+1}^{t} γ_i^(t) · ||M(k_i) - v_i||²
+```
+
+Where:
+- `c`: context window length
+- `γ_i^(t)`: learned decay weights for token importance
+- `M`: deep memory network
+
+### Model Variants
+
+| Model | Description |
+|-------|-------------|
+| **Atlas** | Full model with Muon optimizer |
+| **OmegaNet** | Omega rule with standard gradient descent |
+| **DeepTransformer** | Backbone combining Atlas memory + sliding window attention |
+
+## Key Components
 
 ### Polynomial Features
 
@@ -112,65 +106,55 @@ phi = PolynomialFeatures(input_dim=64, degree=2)
 features = phi(keys)  # Superlinear capacity
 ```
 
-## Training
+### Omega Rule
 
-```bash
-# Train Titans on your data
-python examples/train_titans.py \
-    --variant MAG \
-    --d_model 512 \
-    --num_layers 12 \
-    --epochs 100 \
-    --batch_size 32
+```python
+from titans_atlas.models.atlas import OmegaRule
+
+omega = OmegaRule(
+    d_key=64,
+    d_value=64,
+    context_window=64,
+    polynomial_degree=2,
+)
+
+output, memory_state = omega(keys, values, queries)
 ```
-
-## Memory Equations
-
-### Titans Memory Update
-```
-S_t = η_t * S_{t-1} - θ_t * ∇ℓ(M_{t-1}; x_t)  # Surprise
-M_t = (1 - α_t) * M_{t-1} + S_t                # Update
-```
-
-### Atlas Omega Rule
-```
-min_M Σ_{i=t-c+1}^{t} γ_i^(t) · ||M(k_i) - v_i||²
-```
-
-## Performance
-
-From the papers:
-- Titans handles sequences >2M tokens
-- Atlas achieves +80% accuracy improvement on 10M context BABILong
-- Linear-time inference vs quadratic for Transformers
-- Maintains competitive performance on standard benchmarks
 
 ## Configuration Presets
 
 ```python
-from titans_atlas.configs import titans_small, titans_medium, titans_large, atlas_small
+from titans_atlas.configs import atlas_small, atlas_medium, atlas_large
 
-# Pre-configured models
-config = titans_medium()  # ~400M params
-config = atlas_small()    # With Omega rule
+config = atlas_small()   # ~170M params
+config = atlas_medium()  # ~400M params
+config = atlas_large()   # ~760M params
 ```
+
+## Performance
+
+From the paper:
+- Atlas achieves +80% accuracy improvement on 10M context BABILong
+- Handles sequences >2M tokens with linear-time inference
+- Maintains competitive performance on standard benchmarks
 
 ## Tests
 
 ```bash
-python -m pytest tests/ -v
+python -m pytest titans_atlas/tests/ -v
 ```
+
+## Project Context
+
+This implementation is part of a research portfolio exploring memory-augmented architectures:
+
+- **Todd_MemRAG**: Industry-standard RAG with embedding-based retrieval
+- **[Todd_Titans](https://github.com/r3d91ll/Todd_Titans)**: Titans paper implementation (archived reference)
+- **Todd_Atlas**: This repo - Atlas with continuous memory (active development)
 
 ## Citation
 
 ```bibtex
-@article{behrouz2025titans,
-  title={Titans: Learning to Memorize at Test Time},
-  author={Behrouz, Ali and Zhong, Peilin and Mirrokni, Vahab},
-  journal={arXiv preprint arXiv:2501.00663},
-  year={2025}
-}
-
 @article{behrouz2025atlas,
   title={Atlas: Learning to Optimally Memorize the Context at Test Time},
   author={Behrouz, Ali and others},

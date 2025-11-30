@@ -1,7 +1,7 @@
-"""Configuration classes for Titans and Atlas models."""
+"""Configuration classes for Atlas models."""
 
 from dataclasses import dataclass, field
-from typing import Optional, Literal
+from typing import Optional
 
 
 @dataclass
@@ -70,18 +70,31 @@ class AttentionConfig:
 
 
 @dataclass
-class TitansConfig:
-    """Configuration for Titans model."""
+class AtlasConfig:
+    """Configuration for Atlas model."""
 
     # Model dimensions
     d_model: int = 512
     num_layers: int = 12
 
-    # Architecture variant
-    variant: Literal["MAC", "MAG", "MAL"] = "MAG"
+    # Omega rule parameters
+    context_window: int = 64  # c in the paper
 
-    # Chunk size for MAC variant
-    chunk_size: int = 512
+    # Polynomial features
+    polynomial_degree: int = 2  # p in φ_p(x)
+    use_polynomial_features: bool = True
+
+    # Muon optimizer for memory
+    use_muon_optimizer: bool = True
+    muon_momentum: float = 0.95
+    muon_nesterov: bool = True
+
+    # Learned decay weights γ_i^(t)
+    learnable_decay_weights: bool = True
+
+    # Taylor expansion for softmax approximation
+    taylor_expansion_order: int = 4
+    learnable_taylor_coeffs: bool = True
 
     # Memory configuration
     memory: MemoryConfig = field(default_factory=MemoryConfig)
@@ -111,63 +124,9 @@ class TitansConfig:
         self.attention.d_model = self.d_model
 
 
-@dataclass
-class AtlasConfig(TitansConfig):
-    """Configuration for Atlas model (extends Titans)."""
-
-    # Omega rule parameters
-    context_window: int = 64  # c in the paper
-
-    # Polynomial features
-    polynomial_degree: int = 2  # p in φ_p(x)
-    use_polynomial_features: bool = True
-
-    # Muon optimizer for memory
-    use_muon_optimizer: bool = True
-    muon_momentum: float = 0.95
-    muon_nesterov: bool = True
-
-    # Learned decay weights γ_i^(t)
-    learnable_decay_weights: bool = True
-
-    # Taylor expansion for softmax approximation
-    taylor_expansion_order: int = 4
-    learnable_taylor_coeffs: bool = True
-
-
 # Preset configurations
-def titans_small() -> TitansConfig:
-    """170M parameter Titans configuration."""
-    return TitansConfig(
-        d_model=768,
-        num_layers=12,
-        memory=MemoryConfig(d_model=768, d_key=64, d_value=64, num_memory_layers=2),
-        attention=AttentionConfig(d_model=768, num_heads=12, d_head=64),
-    )
-
-
-def titans_medium() -> TitansConfig:
-    """400M parameter Titans configuration."""
-    return TitansConfig(
-        d_model=1024,
-        num_layers=24,
-        memory=MemoryConfig(d_model=1024, d_key=64, d_value=64, num_memory_layers=2),
-        attention=AttentionConfig(d_model=1024, num_heads=16, d_head=64),
-    )
-
-
-def titans_large() -> TitansConfig:
-    """760M parameter Titans configuration."""
-    return TitansConfig(
-        d_model=1536,
-        num_layers=24,
-        memory=MemoryConfig(d_model=1536, d_key=96, d_value=96, num_memory_layers=3),
-        attention=AttentionConfig(d_model=1536, num_heads=16, d_head=96),
-    )
-
-
 def atlas_small() -> AtlasConfig:
-    """Small Atlas configuration."""
+    """Small Atlas configuration (~170M params)."""
     return AtlasConfig(
         d_model=768,
         num_layers=12,
@@ -175,4 +134,28 @@ def atlas_small() -> AtlasConfig:
         polynomial_degree=2,
         memory=MemoryConfig(d_model=768, d_key=64, d_value=64, num_memory_layers=2),
         attention=AttentionConfig(d_model=768, num_heads=12, d_head=64),
+    )
+
+
+def atlas_medium() -> AtlasConfig:
+    """Medium Atlas configuration (~400M params)."""
+    return AtlasConfig(
+        d_model=1024,
+        num_layers=24,
+        context_window=64,
+        polynomial_degree=2,
+        memory=MemoryConfig(d_model=1024, d_key=64, d_value=64, num_memory_layers=2),
+        attention=AttentionConfig(d_model=1024, num_heads=16, d_head=64),
+    )
+
+
+def atlas_large() -> AtlasConfig:
+    """Large Atlas configuration (~760M params)."""
+    return AtlasConfig(
+        d_model=1536,
+        num_layers=24,
+        context_window=128,
+        polynomial_degree=2,
+        memory=MemoryConfig(d_model=1536, d_key=96, d_value=96, num_memory_layers=3),
+        attention=AttentionConfig(d_model=1536, num_heads=16, d_head=96),
     )

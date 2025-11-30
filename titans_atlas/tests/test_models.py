@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Unit tests for Titans and Atlas models.
+Unit tests for Atlas models.
 
 Run with: python -m pytest tests/test_models.py -v
 """
@@ -12,10 +12,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from titans_atlas.configs import TitansConfig, AtlasConfig, MemoryConfig, AttentionConfig
+from titans_atlas.configs import AtlasConfig, MemoryConfig, AttentionConfig
 from titans_atlas.layers.memory import DeepMemory, NeuralMemory, NeuralMemoryParallel
 from titans_atlas.layers.attention import SlidingWindowAttention, PersistentMemoryAttention
-from titans_atlas.models.titans import TitansMAC, TitansMAG, TitansMAL, TitansLM
 from titans_atlas.models.atlas import (
     PolynomialFeatures,
     LearnableTaylorKernel,
@@ -166,55 +165,6 @@ class TestOmegaRule:
         queries = torch.randn(2, 20, 32)
         output, state = omega(keys, values, queries)
         assert output.shape == (2, 20, 32)
-
-
-class TestTitansVariants:
-    """Tests for Titans architecture variants."""
-
-    @pytest.fixture
-    def small_config(self):
-        """Create small config for testing."""
-        return TitansConfig(
-            d_model=64,
-            num_layers=2,
-            chunk_size=16,
-            memory=MemoryConfig(d_model=64, d_key=16, d_value=16, num_memory_layers=2),
-            attention=AttentionConfig(d_model=64, num_heads=2, d_head=16, window_size=16,
-                                     use_flash_attention=False),
-            vocab_size=100,
-            max_seq_len=64,
-        )
-
-    def test_titans_mac(self, small_config):
-        """Test TitansMAC forward pass."""
-        model = TitansMAC(small_config)
-        x = torch.randn(2, 32, 64)
-        output, states = model(x)
-        assert output.shape == (2, 32, 64)
-        assert len(states) == 2
-
-    def test_titans_mag(self, small_config):
-        """Test TitansMAG forward pass."""
-        model = TitansMAG(small_config)
-        x = torch.randn(2, 32, 64)
-        output, states = model(x)
-        assert output.shape == (2, 32, 64)
-
-    def test_titans_mal(self, small_config):
-        """Test TitansMAL forward pass."""
-        model = TitansMAL(small_config)
-        x = torch.randn(2, 32, 64)
-        output, states = model(x)
-        assert output.shape == (2, 32, 64)
-
-    def test_titans_lm(self, small_config):
-        """Test TitansLM forward pass."""
-        model = TitansLM(small_config, variant="MAG")
-        input_ids = torch.randint(0, 100, (2, 32))
-        outputs = model(input_ids=input_ids, labels=input_ids)
-        assert "logits" in outputs
-        assert "loss" in outputs
-        assert outputs["logits"].shape == (2, 32, 100)
 
 
 class TestAtlas:

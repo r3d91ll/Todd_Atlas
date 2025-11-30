@@ -1,1 +1,1 @@
-"""Example scripts for Titans and Atlas models."""
+"""Example scripts for Atlas models."""

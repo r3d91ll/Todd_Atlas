@@ -1,12 +1,12 @@
 """
-Attention mechanisms for Titans and Atlas.
+Attention mechanisms for Atlas.
 
 Implements:
 - Sliding Window Attention
 - Persistent Memory Attention
 - Memory-augmented attention variants
 
-Paper: "Titans: Learning to Memorize at Test Time" (arXiv:2501.00663)
+Paper: "Atlas: Learning to Optimally Memorize the Context at Test Time" (arXiv:2505.23735)
 """
 
 import torch

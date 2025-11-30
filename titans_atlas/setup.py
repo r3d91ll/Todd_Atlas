@@ -27,10 +27,10 @@ setup(
     name="titans_atlas",
     version="0.1.0",
     author="Implementation of Behrouz et al.",
-    description="Titans & Atlas: Learning to Memorize at Test Time",
+    description="Atlas: Learning to Optimally Memorize at Test Time",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/example/titans_atlas",
+    url="https://github.com/r3d91ll/Todd_Atlas",
     packages=find_packages(exclude=["tests", "examples"]),
     classifiers=[
         "Development Status :: 3 - Alpha",
@@ -56,11 +56,6 @@ setup(
         "flash": [
             "flash-attn>=2.3.0",
             "triton>=2.1.0",
-        ],
-    },
-    entry_points={
-        "console_scripts": [
-            "train-titans=titans_atlas.examples.train_titans:main",
         ],
     },
 )

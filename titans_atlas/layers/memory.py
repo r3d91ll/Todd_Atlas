@@ -1,10 +1,10 @@
 """
-Neural Memory Module for Titans and Atlas.
+Neural Memory Module for Atlas.
 
 Implements the long-term memory that learns to memorize at test time
 through gradient-based optimization with surprise metric.
 
-Paper: "Titans: Learning to Memorize at Test Time" (arXiv:2501.00663)
+Paper: "Atlas: Learning to Optimally Memorize the Context at Test Time" (arXiv:2505.23735)
 """
 
 import torch
