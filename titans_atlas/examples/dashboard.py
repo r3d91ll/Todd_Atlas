@@ -55,8 +55,10 @@ def load_jsonl(filepath: Path, max_lines: int = 10000) -> List[Dict]:
                     records.append(json.loads(line.strip()))
                 except json.JSONDecodeError:
                     continue
-    except Exception:
-        pass
+    except OSError as e:
+        # Log but don't fail - dashboard should be resilient to transient file issues
+        import logging
+        logging.debug(f"Could not read {filepath}: {e}")
 
     return records
 
@@ -405,7 +407,7 @@ def run_dash_dashboard(run_dir: Path, port: int = 8050):
         )
 
     print(f"Starting Dash dashboard at http://localhost:{port}")
-    app.run_server(debug=False, host="0.0.0.0", port=port)
+    app.run_server(debug=False, host="127.0.0.1", port=port)
 
 
 def main():

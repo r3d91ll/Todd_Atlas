@@ -20,6 +20,21 @@ import numpy as np
 from collections import deque
 
 
+def _convert_numpy_types(obj: Any) -> Any:
+    """Convert numpy types to Python types for JSON serialization."""
+    if isinstance(obj, dict):
+        return {k: _convert_numpy_types(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [_convert_numpy_types(v) for v in obj]
+    elif isinstance(obj, (np.bool_, np.integer)):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return obj
+
+
 @dataclass
 class ConvergenceState:
     """Current convergence state."""
@@ -55,7 +70,11 @@ class LossWindow:
     """Sliding window for loss statistics."""
 
     window_size: int = 100
-    values: deque = field(default_factory=lambda: deque(maxlen=100))
+    values: deque = field(default_factory=deque)
+
+    def __post_init__(self):
+        # Recreate deque with correct maxlen from window_size
+        self.values = deque(self.values, maxlen=self.window_size)
 
     def add(self, value: float):
         self.values.append(value)
@@ -345,22 +364,8 @@ class ConvergenceMetrics:
         # Write only recent entries (not the entire history each time)
         recent = self.history[-1] if self.history else {}
 
-        # Convert numpy types to Python types for JSON serialization
-        def convert_types(obj):
-            if isinstance(obj, dict):
-                return {k: convert_types(v) for k, v in obj.items()}
-            elif isinstance(obj, (list, tuple)):
-                return [convert_types(v) for v in obj]
-            elif isinstance(obj, (np.bool_, np.integer)):
-                return int(obj)
-            elif isinstance(obj, np.floating):
-                return float(obj)
-            elif isinstance(obj, np.ndarray):
-                return obj.tolist()
-            return obj
-
         with open(filepath, "a") as f:
-            f.write(json.dumps(convert_types(recent)) + "\n")
+            f.write(json.dumps(_convert_numpy_types(recent)) + "\n")
 
         return str(filepath)
 
@@ -369,22 +374,8 @@ class ConvergenceMetrics:
         if filepath is None:
             filepath = self.output_dir / "full_history.json"
 
-        # Convert numpy types to Python types for JSON serialization
-        def convert_types(obj):
-            if isinstance(obj, dict):
-                return {k: convert_types(v) for k, v in obj.items()}
-            elif isinstance(obj, (list, tuple)):
-                return [convert_types(v) for v in obj]
-            elif isinstance(obj, (np.bool_, np.integer)):
-                return int(obj)
-            elif isinstance(obj, np.floating):
-                return float(obj)
-            elif isinstance(obj, np.ndarray):
-                return obj.tolist()
-            return obj
-
         with open(filepath, "w") as f:
-            json.dump(convert_types(self.history), f, indent=2)
+            json.dump(_convert_numpy_types(self.history), f, indent=2)
 
     def get_summary(self) -> Dict[str, Any]:
         """Get summary statistics."""

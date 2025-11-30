@@ -91,7 +91,7 @@ def compute_geometric_metrics(tensor: Tensor, compute_svd: bool = True) -> Geome
     if compute_svd and tensor.numel() > 0:
         try:
             # SVD decomposition
-            U, S, Vh = torch.linalg.svd(tensor, full_matrices=False)
+            _, S, _ = torch.linalg.svd(tensor, full_matrices=False)
             metrics.singular_values = S
 
             # Spectral norm (largest singular value)
@@ -128,9 +128,10 @@ def compute_geometric_metrics(tensor: Tensor, compute_svd: bool = True) -> Geome
                 if total_variance > 1e-10:
                     metrics.collapse_beta = (top_variance / total_variance).item()
 
-        except Exception as e:
-            # SVD can fail for degenerate matrices
-            pass
+        except RuntimeError as e:
+            # SVD can fail for degenerate/ill-conditioned matrices
+            import logging
+            logging.debug(f"SVD computation failed: {e}")
 
     return metrics
 
@@ -728,7 +729,9 @@ class WeaverSpaceMetrics:
             """Capture attention weights from attention modules."""
             # Output from SlidingWindowAttention is (output, kv_cache)
             # We need to hook deeper to get attention weights
-            pass
+            # TODO: Implement attention weight capture when attention modules expose weights
+            # For now, attention geometry must be captured manually via capture() method
+            _ = module, input, output  # Silence unused warnings
 
         # Register hooks on DeepTransformerBlocks
         for name, module in model.named_modules():
@@ -796,15 +799,17 @@ class WeaverSpaceMetrics:
 
         # Capture omega quality
         if omega_data is not None:
-            omega_metrics = self.omega_quality.capture(
-                keys=omega_data.get("keys"),
-                values=omega_data.get("values"),
-                predictions=omega_data.get("predictions"),
-                decay_weights=omega_data.get("decay_weights"),
-                step=step,
-            )
-            if omega_metrics:
-                metrics["omega"] = omega_metrics
+            required_keys = ["keys", "values", "predictions", "decay_weights"]
+            if all(k in omega_data and omega_data[k] is not None for k in required_keys):
+                omega_metrics = self.omega_quality.capture(
+                    keys=omega_data["keys"],
+                    values=omega_data["values"],
+                    predictions=omega_data["predictions"],
+                    decay_weights=omega_data["decay_weights"],
+                    step=step,
+                )
+                if omega_metrics:
+                    metrics["omega"] = omega_metrics
 
         return metrics
 

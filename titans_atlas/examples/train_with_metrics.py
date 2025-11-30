@@ -101,6 +101,9 @@ def get_lr(step: int, warmup_steps: int, max_steps: int, max_lr: float, min_lr: 
     if step < warmup_steps:
         return max_lr * step / warmup_steps
 
+    if max_steps <= warmup_steps:
+        return min_lr
+
     decay_ratio = (step - warmup_steps) / (max_steps - warmup_steps)
     decay_ratio = min(decay_ratio, 1.0)
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
@@ -210,7 +213,8 @@ def main():
         enabled=args.enable_weaver_metrics,
     )
 
-    grad_monitor = GradientMonitor(model)
+    # Note: GradientMonitor available for detailed per-layer analysis if needed
+    # grad_monitor = GradientMonitor(model)
 
     # Register hooks for hidden state capture
     weaver_metrics.register_hooks(model)
