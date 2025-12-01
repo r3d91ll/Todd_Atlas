@@ -299,18 +299,19 @@ class NeuralMemory(nn.Module):
             param.data = original_params[name]
 
         # Compute surprise: S_t = η_t * S_{t-1} - θ_t * ∇ℓ
+        # Note: We average theta and eta across the batch to get shared update parameters
         surprise = {}
         for i, (name, grad) in enumerate(gradients.items()):
-            # Get layer-specific theta (learning rate)
+            # Get layer-specific theta (learning rate), averaged across batch
             layer_idx = min(i, theta.shape[-1] - 1)
-            theta_i = theta[..., layer_idx].unsqueeze(-1).unsqueeze(-1)
+            theta_i = theta[..., layer_idx].mean()  # scalar
 
-            # Momentary surprise: -θ_t * ∇ℓ
+            # Momentary surprise: -θ_t * ∇ℓ (grad is 2D, keep it 2D)
             momentary = -theta_i * grad
 
             # Add momentum from previous surprise
             if eta is not None and prev_surprise is not None and name in prev_surprise:
-                eta_i = eta[..., layer_idx].unsqueeze(-1).unsqueeze(-1)
+                eta_i = eta[..., layer_idx].mean()  # scalar
                 surprise[name] = eta_i * prev_surprise[name] + momentary
             else:
                 surprise[name] = momentary
@@ -378,9 +379,15 @@ class NeuralMemory(nn.Module):
             alpha_t = alpha[:, t] if alpha is not None else None
 
             # Query memory with current query
-            # Temporarily load weights
+            # Temporarily load weights (average across batch if batched)
             for name, param in self.memory.named_parameters():
-                param.data = current_weights[name].mean(dim=0)  # Average across batch
+                w = current_weights[name]
+                if w.ndim > param.ndim:
+                    # Batched weights - average to get shared weights
+                    param.data = w.mean(dim=0)
+                else:
+                    # Already unbatched
+                    param.data = w
 
             memory_output = self.memory(q_t)  # (batch, d_value)
 
@@ -395,13 +402,14 @@ class NeuralMemory(nn.Module):
             )
 
             # Update memory: M_t = (1 - α_t) * M_{t-1} + S_t
+            # Average alpha across batch to get shared decay
             new_weights = {}
             for name in current_weights:
                 if alpha_t is not None:
-                    # Get layer-specific alpha
+                    # Get layer-specific alpha, averaged across batch
                     layer_idx = list(current_weights.keys()).index(name)
                     layer_idx = min(layer_idx, alpha_t.shape[-1] - 1)
-                    alpha_i = alpha_t[..., layer_idx].unsqueeze(-1).unsqueeze(-1)
+                    alpha_i = alpha_t[..., layer_idx].mean()  # scalar
                     decay = 1 - alpha_i
                 else:
                     decay = 1.0
