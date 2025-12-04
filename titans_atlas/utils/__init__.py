@@ -94,6 +94,31 @@ class RotaryEmbedding(nn.Module):
         return torch.cat([-x2, x1], dim=-1)
 
 
+class RMSNorm(nn.Module):
+    """
+    Root Mean Square Layer Normalization.
+
+    RMSNorm is simpler and faster than LayerNorm:
+    - No mean centering (no beta parameter)
+    - Only scale by RMS: x * weight / RMS(x)
+
+    Used in LLaMA, Mistral, and other modern architectures.
+    Typically 10-15% faster than LayerNorm with similar quality.
+
+    Reference: "Root Mean Square Layer Normalization" (Zhang & Sennrich, 2019)
+    """
+
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # RMS = sqrt(mean(x^2))
+        rms = torch.sqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+        return x / rms * self.weight
+
+
 class DepthwiseConv1d(nn.Module):
     """Depthwise separable 1D convolution for Q, K, V projections."""
 

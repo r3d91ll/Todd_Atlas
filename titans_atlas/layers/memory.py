@@ -19,6 +19,7 @@ from titans_atlas.utils import (
     l2_normalize,
     parallel_scan,
     DepthwiseConv1d,
+    RMSNorm,
 )
 
 
@@ -192,9 +193,9 @@ class NeuralMemory(nn.Module):
             self.register_buffer("fixed_forget", torch.tensor(0.01))
         self.learnable_forget = learnable_forget
 
-        # Layer norm
+        # RMSNorm (faster than LayerNorm)
         if use_layer_norm:
-            self.layer_norm = nn.LayerNorm(d_value)
+            self.layer_norm = RMSNorm(d_value)
         else:
             self.layer_norm = None
 
@@ -491,7 +492,7 @@ class NeuralMemoryParallel(nn.Module):
 
         # Output projection
         self.out_proj = nn.Linear(d_value, d_model)
-        self.layer_norm = nn.LayerNorm(d_value)
+        self.layer_norm = RMSNorm(d_value)
 
     def forward(
         self,

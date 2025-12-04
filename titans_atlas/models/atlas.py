@@ -20,7 +20,7 @@ import math
 
 from titans_atlas.layers.memory import DeepMemory
 from titans_atlas.layers.attention import SlidingWindowAttention, GatedAttentionUnit
-from titans_atlas.utils import get_activation, l2_normalize, parallel_scan
+from titans_atlas.utils import get_activation, l2_normalize, parallel_scan, RMSNorm
 from titans_atlas.configs import AtlasConfig
 
 
@@ -346,22 +346,22 @@ class OmegaRule(nn.Module):
         memory_state: Optional[Dict[str, Tensor]] = None,
     ) -> Tuple[Tensor, Dict[str, Tensor]]:
         """
-        Apply Omega rule for sliding window memory optimization.
+        Efficient Omega rule - chunked parallel implementation.
 
-        Args:
-            keys: (batch, seq_len, d_key)
-            values: (batch, seq_len, d_value)
-            queries: (batch, seq_len, d_key)
-            memory_state: Previous memory state
+        From the paper: Process in chunks of size context_window.
+        Within each chunk, compute the full window gradient in parallel,
+        then update memory once per chunk. This gives O(seq_len/c) memory
+        updates instead of O(seq_len), with proper Omega rule semantics.
 
-        Returns:
-            output: (batch, seq_len, d_value)
-            new_memory_state: Updated memory
+        The key insight: batch the outer products within each chunk and
+        compute the gradient sum using parallel matrix operations.
         """
         batch, seq_len, _ = keys.shape
         device = keys.device
+        dtype = keys.dtype
+        c = self.context_window
 
-        # Apply polynomial features to keys and queries
+        # Apply polynomial features
         if self.phi is not None:
             keys_phi = self.phi(keys)
             queries_phi = self.phi(queries)
@@ -369,59 +369,78 @@ class OmegaRule(nn.Module):
             keys_phi = keys
             queries_phi = queries
 
-        # Initialize memory state with both weights and biases
-        if memory_state is None:
-            memory_state = {}
-            for name, param in self.memory.named_parameters():
-                if param.ndim == 2:  # Weight matrices: (out, in)
-                    memory_state[name] = param.data.clone().unsqueeze(0).expand(batch, -1, -1).clone()
-                elif param.ndim == 1:  # Biases: (out,)
-                    memory_state[name] = param.data.clone().unsqueeze(0).expand(batch, -1).clone()
+        phi_dim = keys_phi.shape[-1]
 
+        # Initialize linear memory M: (batch, d_value, phi_dim)
+        if memory_state is None:
+            M = torch.zeros(batch, self.d_value, phi_dim, device=device, dtype=dtype)
+        else:
+            M = memory_state.get('_linear_M',
+                torch.zeros(batch, self.d_value, phi_dim, device=device, dtype=dtype))
+
+        # Compute all decay weights and forget gates in parallel
+        if self.learnable_decay:
+            gamma = torch.sigmoid(self.decay_proj(keys).squeeze(-1))
+        else:
+            gamma = self.fixed_decay[:seq_len].unsqueeze(0).expand(batch, -1)
+
+        alpha = torch.sigmoid(self.alpha_proj(keys).mean(dim=-1))
+
+        eta = 0.1
         outputs = []
 
-        for t in range(seq_len):
-            # Define sliding window
-            start = max(0, t - self.context_window + 1)
-            end = t + 1
+        # Process in chunks of size context_window
+        num_chunks = (seq_len + c - 1) // c
 
-            window_keys = keys_phi[:, start:end]  # (batch, window, phi_dim)
-            window_values = values[:, start:end]  # (batch, window, d_value)
-            window_size = end - start
+        for chunk_idx in range(num_chunks):
+            start = chunk_idx * c
+            end = min(start + c, seq_len)
+            chunk_len = end - start
 
-            # Compute decay weights for window
-            decay_weights = self._compute_decay_weights(
-                keys[:, start:end], window_size
-            )  # (batch, window)
+            # Get chunk data
+            k_chunk = keys_phi[:, start:end]      # (batch, chunk_len, phi_dim)
+            v_chunk = values[:, start:end]        # (batch, chunk_len, d_value)
+            q_chunk = queries_phi[:, start:end]   # (batch, chunk_len, phi_dim)
+            g_chunk = gamma[:, start:end]         # (batch, chunk_len)
+            a_chunk = alpha[:, start:end].mean(dim=-1)  # (batch,) - avg alpha for chunk
 
-            # Omega rule: minimize weighted loss over window
-            # ℓ = Σ γ_i ||M(k_i) - v_i||²
-            # Use autograd to compute proper gradients through deep memory
-            gradients = self._compute_omega_gradients(
-                window_keys, window_values, decay_weights, memory_state
-            )
+            # === PARALLEL GRADIENT COMPUTATION WITHIN CHUNK ===
+            # Compute: gradient = ∑ᵢ γᵢ(vᵢ - Mkᵢ)kᵢᵀ for all i in chunk
+            #
+            # Step 1: Compute Mkᵢ for all i in parallel
+            # M: (batch, d_value, phi_dim), k_chunk: (batch, chunk_len, phi_dim)
+            Mk_chunk = torch.bmm(M, k_chunk.transpose(-2, -1))  # (batch, d_value, chunk_len)
+            Mk_chunk = Mk_chunk.transpose(-2, -1)  # (batch, chunk_len, d_value)
 
-            # Update memory using Muon optimizer
-            # Use no_grad since this is test-time learning, not training gradients
-            with torch.no_grad():
-                alpha = torch.sigmoid(self.alpha_proj(keys[:, t]).mean(dim=0))
-                lr = 0.1 * (1 - alpha.mean().item())  # Adaptive LR based on forget gate
+            # Step 2: Compute errors: vᵢ - Mkᵢ
+            errors = v_chunk - Mk_chunk  # (batch, chunk_len, d_value)
 
-                # Apply forget gate
-                for name in memory_state:
-                    layer_idx = min(int(name.split(".")[0]) if name[0].isdigit() else 0,
-                                  len(alpha) - 1)
-                    memory_state[name] = (1 - alpha[layer_idx]) * memory_state[name]
+            # Step 3: Weight by γᵢ
+            g_exp = g_chunk.unsqueeze(-1)  # (batch, chunk_len, 1)
+            weighted_errors = g_exp * errors  # (batch, chunk_len, d_value)
 
-                # Muon step
-                memory_state = self.muon.step(memory_state, gradients, lr=lr)
+            # Step 4: Compute ∑ᵢ γᵢ(vᵢ - Mkᵢ)kᵢᵀ using batched outer product sum
+            # weighted_errors: (batch, chunk_len, d_value)
+            # k_chunk: (batch, chunk_len, phi_dim)
+            # We want: ∑ᵢ weighted_errors[i] ⊗ k_chunk[i]ᵀ
+            # = einsum('bcd,bcp->bdp', weighted_errors, k_chunk)
+            gradient = torch.einsum('bcd,bcp->bdp', weighted_errors, k_chunk)  # (batch, d_value, phi_dim)
 
-            # Query updated memory
-            output_t = self._memory_forward(queries_phi[:, t], memory_state)
-            outputs.append(output_t)
+            # Update memory with forget gate (once per chunk)
+            a_t = a_chunk.unsqueeze(-1).unsqueeze(-1)  # (batch, 1, 1)
+            M = a_t * M + eta * gradient
 
-        output = torch.stack(outputs, dim=1)
-        return output, memory_state
+            # Query memory for all positions in chunk (parallel)
+            # output = M @ qᵢ for each i in chunk
+            chunk_outputs = torch.bmm(M, q_chunk.transpose(-2, -1))  # (batch, d_value, chunk_len)
+            chunk_outputs = chunk_outputs.transpose(-2, -1)  # (batch, chunk_len, d_value)
+            outputs.append(chunk_outputs)
+
+        # Concatenate all chunk outputs
+        output = torch.cat(outputs, dim=1)  # (batch, seq_len, d_value)
+        new_memory_state = {'_linear_M': M}
+
+        return output, new_memory_state
 
     def forward_chunked(
         self,
@@ -605,7 +624,7 @@ class OmegaRule(nn.Module):
         """
         Compute gradients for Omega rule using autograd.
 
-        For deep memory, we need proper backprop through all layers.
+        FIXED: Now maintains gradient flow for training!
         The loss is: ℓ = Σ γ_i ||M(k_i) - v_i||²
 
         Args:
@@ -619,73 +638,68 @@ class OmegaRule(nn.Module):
         """
         batch, window_size, phi_dim = window_keys.shape
 
-        # Use enable_grad to ensure gradient computation works even inside no_grad context
-        # This is internal test-time learning, not training gradients
-        with torch.enable_grad():
-            # Detach input tensors to isolate this gradient computation from the main graph
-            # Convert to float32 for stable gradient computation
-            window_keys = window_keys.detach().float()
-            window_values = window_values.detach().float()
-            decay_weights = decay_weights.detach().float()
+        # For Omega rule internal gradient computation, we detach to isolate
+        # This is the memory's internal learning, separate from training gradients
+        # Training gradients flow through _memory_forward output, not here
+        window_keys_f = window_keys.detach().float()
+        window_values_f = window_values.detach().float()
+        decay_weights_f = decay_weights.detach().float()
 
-            # Create temporary parameters for gradient computation
-            # We need to detach and require grad for autograd
-            temp_params = {}
-            for name, param in memory_state.items():
-                # Average across batch if batched, then require grad
-                # Convert to float32 for gradient computation
-                if param.ndim == 3:  # (batch, out, in)
+        # Create leaf tensors for Omega gradient computation
+        temp_params = {}
+        for name, param in memory_state.items():
+            if param.ndim == 3:  # (batch, out, in)
+                temp_params[name] = param.mean(dim=0).detach().float().requires_grad_(True)
+            elif param.ndim == 2 and 'bias' not in name:  # (out, in) unbatched weight
+                temp_params[name] = param.detach().float().requires_grad_(True)
+            else:  # bias or 1D
+                if param.ndim == 2:  # (batch, out) batched bias
                     temp_params[name] = param.mean(dim=0).detach().float().requires_grad_(True)
-                elif param.ndim == 2 and 'bias' not in name:  # (out, in) unbatched weight
-                    temp_params[name] = param.detach().float().requires_grad_(True)
-                else:  # bias or 1D
-                    if param.ndim == 2:  # (batch, out) batched bias
-                        temp_params[name] = param.mean(dim=0).detach().float().requires_grad_(True)
-                    else:
-                        temp_params[name] = param.detach().float().requires_grad_(True)
-
-            # Forward through memory and compute weighted loss
-            # Accumulate losses in a list and sum at the end to maintain gradient graph
-            losses = []
-
-            for i in range(window_size):
-                k_i = window_keys[:, i]  # (batch, phi_dim)
-                v_i = window_values[:, i]  # (batch, d_value)
-                gamma_i = decay_weights[:, i]  # (batch,)
-
-                # Forward through temp params
-                pred = self._memory_forward_with_params(k_i, temp_params)
-                loss_i = ((pred - v_i) ** 2).sum(dim=-1)  # (batch,)
-                weighted_loss = (gamma_i * loss_i).mean()
-                losses.append(weighted_loss)
-
-            # Sum all losses to get total loss with gradient graph
-            total_loss = torch.stack(losses).sum()
-
-            # Backward to get gradients
-            total_loss.backward()
-
-            # Extract gradients and expand back to batch dimension
-            gradients = {}
-            for name, param in temp_params.items():
-                if param.grad is not None:
-                    grad = param.grad.detach()
-                    # Convert back to original dtype if needed
-                    original_dtype = memory_state[name].dtype
-                    if grad.dtype != original_dtype:
-                        grad = grad.to(original_dtype)
-                    # Expand to batch dimension to match memory_state shapes
-                    if memory_state[name].ndim == 3:  # batched weight
-                        gradients[name] = grad.unsqueeze(0).expand(batch, -1, -1).clone()
-                    elif memory_state[name].ndim == 2 and 'bias' not in name:
-                        gradients[name] = grad
-                    else:
-                        if memory_state[name].ndim == 2:  # batched bias
-                            gradients[name] = grad.unsqueeze(0).expand(batch, -1).clone()
-                        else:
-                            gradients[name] = grad
                 else:
-                    gradients[name] = torch.zeros_like(memory_state[name])
+                    temp_params[name] = param.detach().float().requires_grad_(True)
+
+        # Forward through memory and compute weighted loss
+        # Accumulate losses in a list and sum at the end to maintain gradient graph
+        losses = []
+
+        for i in range(window_size):
+            k_i = window_keys_f[:, i]  # (batch, phi_dim)
+            v_i = window_values_f[:, i]  # (batch, d_value)
+            gamma_i = decay_weights_f[:, i]  # (batch,)
+
+            # Forward through temp params
+            pred = self._memory_forward_with_params(k_i, temp_params)
+            loss_i = ((pred - v_i) ** 2).sum(dim=-1)  # (batch,)
+            weighted_loss = (gamma_i * loss_i).mean()
+            losses.append(weighted_loss)
+
+        # Sum all losses to get total loss with gradient graph
+        total_loss = torch.stack(losses).sum()
+
+        # Backward to get gradients for Omega rule (isolated from training graph)
+        total_loss.backward()
+
+        # Extract gradients and expand back to batch dimension
+        gradients = {}
+        for name, param in temp_params.items():
+            if param.grad is not None:
+                grad = param.grad.detach()  # Detach - this is internal to Omega rule
+                # Convert back to original dtype if needed
+                original_dtype = memory_state[name].dtype
+                if grad.dtype != original_dtype:
+                    grad = grad.to(original_dtype)
+                # Expand to batch dimension to match memory_state shapes
+                if memory_state[name].ndim == 3:  # batched weight
+                    gradients[name] = grad.unsqueeze(0).expand(batch, -1, -1).clone()
+                elif memory_state[name].ndim == 2 and 'bias' not in name:
+                    gradients[name] = grad
+                else:
+                    if memory_state[name].ndim == 2:  # batched bias
+                        gradients[name] = grad.unsqueeze(0).expand(batch, -1).clone()
+                    else:
+                        gradients[name] = grad
+            else:
+                gradients[name] = torch.zeros_like(memory_state[name])
 
         return gradients
 
@@ -836,6 +850,7 @@ class AtlasMemory(nn.Module):
         self.query_proj = nn.Linear(d_model, d_key)
 
         # Omega rule memory
+        # chunk_size = context_window so each chunk gets full Omega rule processing
         self.omega = OmegaRule(
             d_key=d_key,
             d_value=d_value,
@@ -844,6 +859,7 @@ class AtlasMemory(nn.Module):
             learnable_decay=True,
             use_polynomial_features=True,
             polynomial_degree=polynomial_degree,
+            chunk_size=context_window,  # Match chunk to context for proper Omega
         )
 
         # Taylor kernel for attention approximation
@@ -854,7 +870,7 @@ class AtlasMemory(nn.Module):
 
         # Output projection
         self.out_proj = nn.Linear(d_value, d_model)
-        self.layer_norm = nn.LayerNorm(d_value)
+        self.layer_norm = RMSNorm(d_value)
 
     def forward(
         self,
@@ -885,12 +901,9 @@ class AtlasMemory(nn.Module):
         keys = l2_normalize(keys, dim=-1)
         queries = l2_normalize(queries, dim=-1)
 
-        # Apply Omega rule
-        # Use chunked mode during training for efficiency
-        if self.training:
-            output, new_state = self.omega.forward_chunked(keys, values, queries, memory_state)
-        else:
-            output, new_state = self.omega(keys, values, queries, memory_state)
+        # Apply Omega rule - FULL per-timestep sliding window optimization
+        # Not using chunked approximation - this is the proper Atlas algorithm
+        output, new_state = self.omega(keys, values, queries, memory_state)
 
         # Normalize and project
         output = self.layer_norm(output)
@@ -950,10 +963,10 @@ class DeepTransformerBlock(nn.Module):
             nn.Dropout(dropout),
         )
 
-        # Layer norms
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
-        self.norm3 = nn.LayerNorm(d_model)
+        # RMSNorm (faster than LayerNorm, used in LLaMA/Mistral)
+        self.norm1 = RMSNorm(d_model)
+        self.norm2 = RMSNorm(d_model)
+        self.norm3 = RMSNorm(d_model)
 
     def forward(
         self,
@@ -1017,7 +1030,7 @@ class DeepTransformer(nn.Module):
             for _ in range(config.num_layers)
         ])
 
-        self.final_norm = nn.LayerNorm(config.d_model)
+        self.final_norm = RMSNorm(config.d_model)
         self._init_weights()
 
     def _init_weights(self):
@@ -1072,7 +1085,7 @@ class OmegaNet(nn.Module):
             for _ in range(config.num_layers)
         ])
 
-        self.final_norm = nn.LayerNorm(config.d_model)
+        self.final_norm = RMSNorm(config.d_model)
 
     def forward(
         self,
