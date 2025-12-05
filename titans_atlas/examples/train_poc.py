@@ -46,11 +46,11 @@ class SyntheticDataset(Dataset):
         return self.num_samples
 
     def __getitem__(self, idx: int):
-        # Generate random tokens
-        tokens = torch.randint(0, self.vocab_size, (self.seq_length + 1,))
+        # Generate random tokens (model handles causal shift internally)
+        tokens = torch.randint(0, self.vocab_size, (self.seq_length,))
         return {
-            "input_ids": tokens[:-1],
-            "labels": tokens[1:],
+            "input_ids": tokens,
+            "labels": tokens,
         }
 
 
@@ -72,16 +72,16 @@ class TokenizedDataset(Dataset):
             raise FileNotFoundError(f"Data file not found: {data_file}")
 
     def __len__(self) -> int:
-        # Account for +1 token needed for label shifting
-        return (self.num_tokens - 1) // self.seq_length
+        return self.num_tokens // self.seq_length
 
     def __getitem__(self, idx: int):
         start = idx * self.seq_length
-        end = start + self.seq_length + 1
+        end = start + self.seq_length
+        # Model handles causal shift internally (labels == input_ids)
         tokens = torch.from_numpy(self.data[start:end].astype('int64'))
         return {
-            "input_ids": tokens[:-1],
-            "labels": tokens[1:],
+            "input_ids": tokens,
+            "labels": tokens,
         }
 
 

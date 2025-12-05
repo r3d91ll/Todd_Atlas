@@ -80,17 +80,18 @@ class TextDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         start = idx * self.seq_length
-        end = start + self.seq_length + 1  # +1 for labels shift
+        end = start + self.seq_length
 
         if self.data is not None:
             tokens = torch.from_numpy(self.data[start:end].astype('int64'))
         else:
             # Random tokens for testing
-            tokens = torch.randint(0, 50257, (self.seq_length + 1,))
+            tokens = torch.randint(0, 50257, (self.seq_length,))
 
+        # Model handles causal shift internally (labels == input_ids)
         return {
-            "input_ids": tokens[:-1],
-            "labels": tokens[1:],
+            "input_ids": tokens,
+            "labels": tokens,
         }
 
 

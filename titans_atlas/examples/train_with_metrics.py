@@ -89,8 +89,7 @@ class TokenizedDataset(Dataset):
             self.start_idx = split_idx
             self.end_idx = self.num_tokens
 
-        # Account for +1 token needed for label shifting
-        self.length = (self.end_idx - self.start_idx - 1) // seq_length
+        self.length = (self.end_idx - self.start_idx) // seq_length
         print(f"{'Train' if is_train else 'Val'} dataset: {self.length:,} samples ({self.end_idx - self.start_idx:,} tokens)")
 
     def __len__(self) -> int:
@@ -98,11 +97,12 @@ class TokenizedDataset(Dataset):
 
     def __getitem__(self, idx: int):
         start = self.start_idx + idx * self.seq_length
-        end = start + self.seq_length + 1
+        end = start + self.seq_length
+        # Model handles causal shift internally (labels == input_ids)
         tokens = torch.from_numpy(self.data[start:end].astype('int64'))
         return {
-            "input_ids": tokens[:-1],
-            "labels": tokens[1:],
+            "input_ids": tokens,
+            "labels": tokens,
         }
 
 
@@ -120,10 +120,11 @@ class SyntheticDataset(Dataset):
         return self.num_samples
 
     def __getitem__(self, idx: int):
-        tokens = torch.randint(0, self.vocab_size, (self.seq_length + 1,))
+        # Model handles causal shift internally (labels == input_ids)
+        tokens = torch.randint(0, self.vocab_size, (self.seq_length,))
         return {
-            "input_ids": tokens[:-1],
-            "labels": tokens[1:],
+            "input_ids": tokens,
+            "labels": tokens,
         }
 
 
