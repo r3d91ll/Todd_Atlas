@@ -89,7 +89,8 @@ class TokenizedDataset(Dataset):
             self.start_idx = split_idx
             self.end_idx = self.num_tokens
 
-        self.length = (self.end_idx - self.start_idx) // seq_length
+        # Account for +1 token needed for label shifting
+        self.length = (self.end_idx - self.start_idx - 1) // seq_length
         print(f"{'Train' if is_train else 'Val'} dataset: {self.length:,} samples ({self.end_idx - self.start_idx:,} tokens)")
 
     def __len__(self) -> int:
@@ -374,15 +375,18 @@ def main():
             train_split=data_cfg.get('train_split', 0.9),
             is_train=True,
         )
+        # Use num_workers=0 for memory-mapped datasets to avoid multiprocessing issues
+        num_workers = 0
     else:
         print("Using synthetic data (random tokens) for throughput testing...")
         dataset = SyntheticDataset(model_cfg['vocab_size'], seq_length, num_samples=100000)
+        num_workers = 4
 
     dataloader = DataLoader(
         dataset,
         batch_size=train_cfg['batch_size'],
         shuffle=True,
-        num_workers=4,
+        num_workers=num_workers,
         pin_memory=True,
         drop_last=True,
     )

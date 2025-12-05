@@ -100,6 +100,10 @@ def get_lr(step: int, config: TrainingConfig) -> float:
         # Linear warmup
         return config.learning_rate * step / config.warmup_steps
 
+    # Guard against division by zero
+    if config.max_steps <= config.warmup_steps:
+        return config.min_lr
+
     # Cosine decay
     decay_ratio = (step - config.warmup_steps) / (config.max_steps - config.warmup_steps)
     decay_ratio = min(decay_ratio, 1.0)
@@ -317,6 +321,7 @@ def train(
     data_iter = iter(train_loader)
     step = start_step
     running_loss = 0.0
+    last_logged_loss = 0.0
     tokens_processed = 0
     start_time = time.time()
 
@@ -394,6 +399,7 @@ def train(
                 import wandb
                 wandb.log(metrics)
 
+            last_logged_loss = running_loss / train_config.log_interval
             running_loss = 0.0
             tokens_processed = 0
             start_time = time.time()
@@ -407,7 +413,7 @@ def train(
             save_checkpoint(
                 model, optimizer, scaler, step,
                 train_config, model_config,
-                {"loss": running_loss},
+                {"loss": last_logged_loss},
                 checkpoint_path,
             )
             print(f"Saved checkpoint to {checkpoint_path}")
@@ -417,7 +423,7 @@ def train(
             save_checkpoint(
                 model, optimizer, scaler, step,
                 train_config, model_config,
-                {"loss": running_loss},
+                {"loss": last_logged_loss},
                 latest_path,
             )
 
@@ -429,7 +435,7 @@ def train(
         save_checkpoint(
             model, optimizer, scaler, step,
             train_config, model_config,
-            {"loss": running_loss},
+            {"loss": last_logged_loss},
             final_path,
         )
         print(f"\nTraining complete! Final checkpoint: {final_path}")

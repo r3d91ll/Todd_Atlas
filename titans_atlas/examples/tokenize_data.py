@@ -122,6 +122,10 @@ def main():
             pbar.close()
 
     total_tokens = len(all_tokens)
+    if total_tokens == 0:
+        print("ERROR: No tokens produced from input files")
+        return 1
+
     print(f"\nTotal characters: {total_chars:,}")
     print(f"Total tokens: {total_tokens:,}")
     print(f"Compression ratio: {total_chars / total_tokens:.2f} chars/token")

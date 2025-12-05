@@ -72,7 +72,8 @@ class TokenizedDataset(Dataset):
             raise FileNotFoundError(f"Data file not found: {data_file}")
 
     def __len__(self) -> int:
-        return self.num_tokens // self.seq_length
+        # Account for +1 token needed for label shifting
+        return (self.num_tokens - 1) // self.seq_length
 
     def __getitem__(self, idx: int):
         start = idx * self.seq_length
@@ -88,6 +89,10 @@ def get_lr(step: int, warmup_steps: int, max_steps: int, max_lr: float, min_lr: 
     """Cosine learning rate schedule with warmup."""
     if step < warmup_steps:
         return max_lr * step / warmup_steps
+
+    # Guard against division by zero
+    if max_steps <= warmup_steps:
+        return min_lr
 
     decay_ratio = (step - warmup_steps) / (max_steps - warmup_steps)
     decay_ratio = min(decay_ratio, 1.0)
