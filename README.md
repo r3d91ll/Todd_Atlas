@@ -138,6 +138,94 @@ From the paper:
 - Handles sequences >2M tokens with linear-time inference
 - Maintains competitive performance on standard benchmarks
 
+## Training
+
+### Quick Start Training
+
+```bash
+cd titans_atlas/examples
+
+# 1. Prepare data (tokenize text into binary format)
+python tokenize_data.py --input /path/to/data.txt --output ./data/
+
+# 2. Train with paper-standard settings (recommended)
+python train_with_metrics.py --config config.yaml
+
+# Or train with command-line arguments:
+python train_with_metrics.py \
+    --data-path ./data/train.bin \
+    --batch-size 64 \
+    --seq-length 256 \
+    --max-steps 50000
+```
+
+### Paper-Standard Hyperparameters
+
+The default configuration uses settings from the Atlas paper:
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Learning Rate | 1e-4 | Peak LR |
+| Warmup Steps | 5000 | 10% of training |
+| LR Schedule | Cosine | Decays to 1e-5 |
+| Batch Size | 64 | Per-GPU |
+| Sequence Length | 256 | Tokens per sample |
+| Context Window | 64 | Memory window size |
+| Weight Decay | 0.1 | AdamW |
+
+### Configuration File
+
+Create a YAML config for full control:
+
+```yaml
+# config.yaml
+experiment: my_experiment
+model:
+  d_model: 512
+  num_layers: 6
+  context_window: 64
+  vocab_size: 32000
+training:
+  batch_size: 64
+  seq_length: 256
+  learning_rate: 1e-4
+  warmup_steps: 5000
+  max_steps: 50000
+data:
+  tokenized_path: "./data/train.bin"
+```
+
+### Monitoring Training
+
+The training script outputs JSONL metrics compatible with various dashboards:
+
+```bash
+# Watch training progress
+tail -f runs/atlas/TIMESTAMP/metrics.jsonl
+
+# Or use the included dashboard
+streamlit run dashboard.py --server.port 8050
+```
+
+### Resume Training
+
+```bash
+python train_with_metrics.py \
+    --config config.yaml \
+    --resume-from runs/atlas/TIMESTAMP/checkpoints/checkpoint_010000.pt
+```
+
+### Multi-GPU Training
+
+Set the device in config or via command-line:
+
+```bash
+# Single GPU (GPU 1)
+python train_with_metrics.py --config config.yaml --device cuda:1
+
+# For DataParallel, use separate processes per GPU (Atlas memory doesn't support DP)
+```
+
 ## Tests
 
 ```bash
