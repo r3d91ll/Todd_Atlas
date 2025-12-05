@@ -140,6 +140,26 @@ class NeuralMemory(nn.Module):
         use_conv: bool = True,
         conv_kernel_size: int = 4,
     ):
+        """
+        Initialize a NeuralMemory module that projects inputs to keys/values/queries and configures a deep key-value memory with optional learnable update dynamics and normalization.
+        
+        Parameters:
+            d_model (int): Dimension of the input model embeddings.
+            d_key (int): Dimension of key/query embeddings produced from inputs.
+            d_value (int): Dimension of value embeddings stored and produced by memory.
+            num_memory_layers (int): Number of stacked layers inside the DeepMemory module.
+            memory_hidden_dim (Optional[int]): Hidden size for internal DeepMemory layers; if None a default is used.
+            activation (str): Activation name used inside DeepMemory.
+            use_momentum (bool): Enable momentum-based accumulation for surprise updates.
+            use_forget_gate (bool): Enable a learnable forget/decay gate for memory updates.
+            learnable_lr (bool): Make the per-layer learning rate θ input-dependent (via a projection) when True; otherwise use a fixed scalar.
+            learnable_momentum (bool): Make the per-layer momentum η input-dependent when True (requires use_momentum).
+            learnable_forget (bool): Make the per-layer forget gate α input-dependent when True (requires use_forget_gate).
+            use_l2_norm_keys (bool): Apply L2 normalization to keys and queries when True.
+            use_layer_norm (bool): Apply RMS normalization to memory outputs when True.
+            use_conv (bool): Apply depthwise 1D convolutions after key/value/query projections when True.
+            conv_kernel_size (int): Kernel size used by the optional depthwise 1D convolutions.
+        """
         super().__init__()
         self.d_model = d_model
         self.d_key = d_key
@@ -462,6 +482,21 @@ class NeuralMemoryParallel(nn.Module):
         use_forget_gate: bool = True,
         use_l2_norm_keys: bool = True,
     ):
+        """
+        Initialize a parallelized neural memory module that maintains a learnable matrix memory and per-chunk update hyperparameters.
+        
+        Parameters:
+            d_model (int): Model embedding dimension used as input and output of the module.
+            d_key (int): Dimensionality of keys and memory rows.
+            d_value (int): Dimensionality of values and memory columns.
+            chunk_size (int): Number of timesteps grouped per memory chunk for efficient updates.
+            num_memory_layers (int): Logical number of memory layers (unused for linear memory but kept for API parity).
+            memory_hidden_dim (Optional[int]): Hidden dimension reserved for multi-layer memory variants; not used for the linear memory implementation.
+            activation (str): Activation name reserved for memory MLPs when present.
+            use_momentum (bool): If true, initialize a learnable momentum parameter for memory updates.
+            use_forget_gate (bool): If true, initialize a learnable forget-gate parameter that controls decay.
+            use_l2_norm_keys (bool): If true, keys and queries will be L2-normalized during forward.
+        """
         super().__init__()
         self.d_model = d_model
         self.d_key = d_key
@@ -500,20 +535,17 @@ class NeuralMemoryParallel(nn.Module):
         memory_state: Optional[Tensor] = None,
     ) -> Tuple[Tensor, Tensor]:
         """
-        Parallel forward pass.
-
-        For linear memory M (matrix), the gradient of ||Mk - v||² w.r.t. M is:
-            ∇_M ℓ = 2(Mk - v)kᵀ
-
-        This allows us to express memory updates as matrix products.
-
-        Args:
-            x: (batch, seq_len, d_model)
-            memory_state: (batch, d_key, d_value) previous memory
-
+        Compute parallelized memory reads and gradient-like updates for a batch of input sequences.
+        
+        Processes input tokens into keys, values, and queries, applies per-chunk learnable update weights and optional momentum/forget gates to update a batched memory matrix, and returns the sequence of projected outputs along with the updated memory.
+        
+        Parameters:
+            x: (batch, seq_len, d_model) input token embeddings.
+            memory_state: (batch, d_key, d_value) optional initial memory; if None, the module's initialized memory is used.
+        
         Returns:
-            output: (batch, seq_len, d_model)
-            new_memory: (batch, d_key, d_value)
+            output: (batch, seq_len, d_model) projected outputs produced by querying the updated memory.
+            new_memory: (batch, d_key, d_value) updated memory matrices for each batch element.
         """
         batch, seq_len, _ = x.shape
 

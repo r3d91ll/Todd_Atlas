@@ -346,15 +346,16 @@ class OmegaRule(nn.Module):
         memory_state: Optional[Dict[str, Tensor]] = None,
     ) -> Tuple[Tensor, Dict[str, Tensor]]:
         """
-        Efficient Omega rule - chunked parallel implementation.
-
-        From the paper: Process in chunks of size context_window.
-        Within each chunk, compute the full window gradient in parallel,
-        then update memory once per chunk. This gives O(seq_len/c) memory
-        updates instead of O(seq_len), with proper Omega rule semantics.
-
-        The key insight: batch the outer products within each chunk and
-        compute the gradient sum using parallel matrix operations.
+        Process keys, values, and queries in chunked groups using the Omega rule to update a linear memory and produce memory-augmented outputs.
+        
+        Parameters:
+            keys (Tensor): Tensor of shape (batch, seq_len, d_key) containing per-token key vectors (may be expanded by polynomial features).
+            values (Tensor): Tensor of shape (batch, seq_len, d_value) containing per-token value vectors.
+            queries (Tensor): Tensor of shape (batch, seq_len, d_key) containing per-token query vectors (may be expanded by polynomial features).
+            memory_state (Optional[Dict[str, Tensor]]): Optional state containing '_linear_M' with shape (batch, d_value, phi_dim). If omitted, memory is initialized to zeros.
+        
+        Returns:
+            Tuple[Tensor, Dict[str, Tensor]]: A pair where the first element is the output tensor of shape (batch, seq_len, d_value) produced by querying the updated memory, and the second element is the updated memory_state dict containing the key '_linear_M'.
         """
         batch, seq_len, _ = keys.shape
         device = keys.device
@@ -450,21 +451,17 @@ class OmegaRule(nn.Module):
         memory_state: Optional[Dict[str, Tensor]] = None,
     ) -> Tuple[Tensor, Dict[str, Tensor]]:
         """
-        Chunked forward pass for faster training.
-
-        Instead of per-timestep updates, processes chunks in parallel and
-        updates memory only at chunk boundaries. This is much faster for
-        training while still capturing the key dynamics.
-
-        Args:
-            keys: (batch, seq_len, d_key)
-            values: (batch, seq_len, d_value)
-            queries: (batch, seq_len, d_key)
-            memory_state: Previous memory state
-
+        Process input sequences in fixed-size chunks, updating the memory only at chunk boundaries to accelerate training while preserving Omega-rule dynamics.
+        
+        Parameters:
+            keys (Tensor): Shape (batch, seq_len, d_key). Sequence of key vectors.
+            values (Tensor): Shape (batch, seq_len, d_value). Sequence of value vectors.
+            queries (Tensor): Shape (batch, seq_len, d_key). Sequence of query vectors.
+            memory_state (Optional[Dict[str, Tensor]]): Current memory parameters replicated per batch; if None, a new batched memory_state is initialized from the module's parameters.
+        
         Returns:
-            output: (batch, seq_len, d_value)
-            new_memory_state: Updated memory
+            output (Tensor): Memory-query outputs for the full sequence, shape (batch, seq_len, d_value).
+            new_memory_state (Dict[str, Tensor]): Updated per-batch memory state after chunked updates.
         """
         batch, seq_len, _ = keys.shape
         device = keys.device
@@ -622,19 +619,18 @@ class OmegaRule(nn.Module):
         memory_state: Dict[str, Tensor],
     ) -> Dict[str, Tensor]:
         """
-        Compute gradients for Omega rule using autograd.
-
-        FIXED: Now maintains gradient flow for training!
-        The loss is: ℓ = Σ γ_i ||M(k_i) - v_i||²
-
-        Args:
-            window_keys: (batch, window, phi_dim) - polynomial-expanded keys
-            window_values: (batch, window, d_value) - target values
-            decay_weights: (batch, window) - importance weights γ_i
-            memory_state: Current memory parameters (may be batched)
-
+        Compute per-parameter gradients for the Omega-rule memory update from a window of key/value pairs.
+        
+        Given a window of polynomial-expanded keys, target values, and per-step decay weights γ_i, this builds the loss ℓ = Σ_i γ_i ||M(k_i) - v_i||² with a temporary copy of the provided memory parameters, backpropagates that loss, and returns gradients shaped to match the original memory_state.
+        
+        Parameters:
+            window_keys (Tensor): shape (batch, window, phi_dim) — polynomial-expanded keys for each timestep.
+            window_values (Tensor): shape (batch, window, d_value) — target values corresponding to each key.
+            decay_weights (Tensor): shape (batch, window) — per-timestep importance weights γ_i that sum (or are normalized) per batch.
+            memory_state (Dict[str, Tensor]): mapping of memory parameter names to tensors (may contain batched parameters).
+        
         Returns:
-            gradients: Dict of gradient tensors matching memory_state shapes
+            Dict[str, Tensor]: gradient tensors for each entry in memory_state. Each gradient matches the shape of the corresponding memory_state tensor (batched gradients are expanded to the original batch dimension).
         """
         batch, window_size, phi_dim = window_keys.shape
 
@@ -839,6 +835,21 @@ class AtlasMemory(nn.Module):
         use_taylor_kernel: bool = True,
         taylor_order: int = 4,
     ):
+        """
+        Initialize AtlasMemory components for long-range memory and projections.
+        
+        Sets up key, value, and query linear projections; an OmegaRule instance for chunked sliding-window memory with polynomial feature expansion; an optional learnable Taylor kernel for attention approximation; an output projection back to model dimension; and an RMSNorm for output normalization.
+        
+        Parameters:
+            d_model (int): Input and output model dimensionality.
+            d_key (int): Dimension of key/query projections.
+            d_value (int): Dimension of value projections and memory outputs.
+            context_window (int): Size of the local context window used by the OmegaRule.
+            num_memory_layers (int): Number of layers inside the OmegaRule memory MLP.
+            polynomial_degree (int): Degree of polynomial feature expansion applied to keys/queries.
+            use_taylor_kernel (bool): If True, create a learnable Taylor kernel to approximate the attention kernel.
+            taylor_order (int): Order of the Taylor series used by the LearnableTaylorKernel (if enabled).
+        """
         super().__init__()
         self.d_model = d_model
         self.d_key = d_key
@@ -878,19 +889,18 @@ class AtlasMemory(nn.Module):
         memory_state: Optional[Dict[str, Tensor]] = None,
     ) -> Tuple[Tensor, Dict[str, Tensor]]:
         """
-        Forward pass through Atlas memory.
-
-        Uses chunked processing during training for efficiency.
-        Falls back to per-timestep processing during evaluation for
-        maximum fidelity to the TITANS architecture.
-
-        Args:
-            x: (batch, seq_len, d_model)
-            memory_state: Previous memory state
-
+        Compute memory-augmented representations for input tokens using AtlasMemory and the Omega Rule.
+        
+        This method projects inputs to keys, values, and queries, applies the OmegaRule memory mechanism (chunked processing during training, per-timestep processing during evaluation), and returns the memory-augmented outputs after normalization and projection.
+        
+        Parameters:
+            x (Tensor): Input token representations with shape (batch, seq_len, d_model).
+            memory_state (Optional[Dict[str, Tensor]]): Optional previous memory state; if provided, it will be updated and returned.
+        
         Returns:
-            output: (batch, seq_len, d_model)
-            new_state: Updated memory state
+            Tuple[Tensor, Dict[str, Tensor]]: 
+                - output: Memory-augmented token representations with shape (batch, seq_len, d_model).
+                - new_state: Updated memory state dictionary.
         """
         # Project to key, value, query
         keys = self.key_proj(x)
@@ -930,6 +940,18 @@ class DeepTransformerBlock(nn.Module):
         ffn_hidden_dim: Optional[int] = None,
         dropout: float = 0.0,
     ):
+        """
+        Create a transformer block that integrates Atlas long-range memory with local sliding-window attention, a gating unit, and a feed-forward network.
+        
+        Parameters:
+            d_model: Model hidden dimension for inputs and outputs.
+            num_heads: Number of attention heads used by the local sliding-window attention.
+            d_head: Dimension of a single attention head (also used as key/value dim in AtlasMemory).
+            context_window: Size of the local context window and the Atlas memory context used for chunking.
+            polynomial_degree: Degree for optional polynomial feature expansion used by AtlasMemory.
+            ffn_hidden_dim: Hidden dimension for the feed-forward network; defaults to 4 * d_model if None.
+            dropout: Dropout probability applied inside attention and the feed-forward output.
+        """
         super().__init__()
         self.d_model = d_model
 
@@ -975,16 +997,15 @@ class DeepTransformerBlock(nn.Module):
         attention_mask: Optional[Tensor] = None,
     ) -> Tuple[Tensor, Dict[str, Tensor]]:
         """
-        Forward pass.
-
-        Args:
-            x: (batch, seq_len, d_model)
-            memory_state: Previous memory state
-            attention_mask: Optional mask
-
+        Compute a transformer block pass that integrates long-range Atlas memory, local sliding-window attention, gating, and a feed-forward residual.
+        
+        Parameters:
+            x: Input tensor of shape (batch, seq_len, d_model).
+            memory_state: Optional previous memory state used by AtlasMemory; when provided, it is updated and returned.
+            attention_mask: Optional attention mask applied to local attention.
+        
         Returns:
-            output: (batch, seq_len, d_model)
-            new_memory_state: Updated state
+            A tuple (output, new_memory_state) where `output` is the block output tensor of shape (batch, seq_len, d_model) and `new_memory_state` is the updated memory state dictionary produced by AtlasMemory.
         """
         # Atlas memory for long-range dependencies
         normed = self.norm1(x)
@@ -1013,6 +1034,16 @@ class DeepTransformer(nn.Module):
     """
 
     def __init__(self, config: AtlasConfig):
+        """
+        Initialize the DeepTransformer using the provided AtlasConfig by constructing its stack of DeepTransformerBlock modules and final normalization.
+        
+        Parameters:
+            config (AtlasConfig): Model configuration containing hyperparameters such as
+                num_layers, d_model, attention (num_heads, d_head), context_window,
+                polynomial_degree, ffn_hidden_dim, and dropout. These fields are used
+                to instantiate each DeepTransformerBlock and to configure the final
+                RMSNorm. The method also calls internal weight initialization.
+        """
         super().__init__()
         self.config = config
 
@@ -1034,6 +1065,10 @@ class DeepTransformer(nn.Module):
         self._init_weights()
 
     def _init_weights(self):
+        """
+        Initialize parameters of submodules.
+        
+        Applies a normal initialization to every nn.Linear weight with standard deviation taken from self.config.init_std and sets linear biases to zero. """
         for module in self.modules():
             if isinstance(module, nn.Linear):
                 nn.init.normal_(module.weight, std=self.config.init_std)
@@ -1068,6 +1103,19 @@ class OmegaNet(nn.Module):
     """
 
     def __init__(self, config: AtlasConfig):
+        """
+        Initialize a DeepTransformer by constructing its stack of DeepTransformerBlock layers and final RMS normalization.
+        
+        Parameters:
+            config (AtlasConfig): Model configuration providing layer count and hyperparameters used to build each block:
+                - d_model: model hidden dimensionality
+                - num_layers: number of transformer blocks to create
+                - attention.num_heads, attention.d_head: attention head configuration for each block
+                - context_window: sliding-window size used by each block
+                - polynomial_degree: degree for optional polynomial feature expansion
+                - ffn_hidden_dim: hidden dimension for feed-forward networks
+                - dropout: dropout probability applied inside blocks
+        """
         super().__init__()
         self.config = config
 
@@ -1093,6 +1141,17 @@ class OmegaNet(nn.Module):
         memory_states: Optional[List[Dict[str, Tensor]]] = None,
         attention_mask: Optional[Tensor] = None,
     ) -> Tuple[Tensor, List[Dict[str, Tensor]]]:
+        """
+        Run the input through each transformer block, updating and returning per-block memory states.
+        
+        Parameters:
+            x (Tensor): Input tensor of shape (batch, seq_len, d_model).
+            memory_states (Optional[List[Dict[str, Tensor]]]): Optional list of memory states, one per block; when None, each block receives None and initializes its own state.
+            attention_mask (Optional[Tensor]): Optional attention mask passed to each block.
+        
+        Returns:
+            Tuple[Tensor, List[Dict[str, Tensor]]]: A tuple containing the normalized output tensor and a list of updated memory states (one dict per block).
+        """
         if memory_states is None:
             memory_states = [None] * len(self.blocks)
 

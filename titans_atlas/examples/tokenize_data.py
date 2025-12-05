@@ -21,6 +21,14 @@ from tqdm import tqdm
 
 
 def main():
+    """
+    CLI entry point that tokenizes input text files and writes memory-mapped token datasets for Atlas training.
+    
+    Processes a single text file or all `.txt` files in a directory using a Hugging Face tokenizer, converts text to token IDs, splits tokens into train/validation according to the provided split ratio, and saves `train.bin`, `val.bin`, and `metadata.json` in the specified output directory. The numeric storage dtype is chosen based on the tokenizer vocabulary size (uint16 when vocab_size <= 65535, otherwise uint32).
+    
+    Returns:
+        int: Exit code `0` on success, `1` on error (e.g., missing transformers, invalid input path, or no `.txt` files found).
+    """
     parser = argparse.ArgumentParser(description="Tokenize text data for Atlas training")
     parser.add_argument(
         "--input",

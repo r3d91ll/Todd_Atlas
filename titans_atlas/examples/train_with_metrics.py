@@ -62,13 +62,13 @@ class TokenizedDataset(Dataset):
         is_train: bool = True,
     ):
         """
-        Initialize tokenized dataset.
-
-        Args:
-            data_path: Path to binary file containing uint16 token IDs.
-            seq_length: Sequence length for each sample.
-            train_split: Fraction of data for training (default: 0.9).
-            is_train: If True, use training split; else validation split.
+        Create a TokenizedDataset by memory-mapping a uint16 token file and defining a train/validation slice.
+        
+        Parameters:
+            data_path (str): Path to a binary file of uint16 token IDs.
+            seq_length (int): Number of tokens per sample sequence.
+            train_split (float): Fraction of the file assigned to the training split (value between 0 and 1).
+            is_train (bool): If True, the dataset uses the first `train_split` portion; otherwise it uses the remainder for validation.
         """
         self.seq_length = seq_length
         data_file = Path(data_path)
@@ -93,9 +93,27 @@ class TokenizedDataset(Dataset):
         print(f"{'Train' if is_train else 'Val'} dataset: {self.length:,} samples ({self.end_idx - self.start_idx:,} tokens)")
 
     def __len__(self) -> int:
+        """
+        Return the number of available samples in the dataset.
+        
+        Returns:
+            int: Count of sequences (samples) that can be indexed from this dataset.
+        """
         return self.length
 
     def __getitem__(self, idx: int):
+        """
+        Retrieve the token sequence at the given sample index and its next-token labels for autoregressive training.
+        
+        Parameters:
+        	idx (int): Sample index; the sequence starts at start_idx + idx * seq_length.
+        
+        Returns:
+        	dict: {
+        		"input_ids": torch.Tensor of dtype `int64` with shape (seq_length,) containing the token sequence excluding the final token,
+        		"labels": torch.Tensor of dtype `int64` with shape (seq_length,) containing the same sequence shifted one token to the left (the next-token targets)
+        	}
+        """
         start = self.start_idx + idx * self.seq_length
         end = start + self.seq_length + 1
         tokens = torch.from_numpy(self.data[start:end].astype('int64'))
@@ -111,14 +129,39 @@ class SyntheticDataset(Dataset):
     """
 
     def __init__(self, vocab_size: int, seq_length: int, num_samples: int = 10000):
+        """
+        Initialize a synthetic token dataset used for throughput and sanity testing.
+        
+        Parameters:
+            vocab_size (int): Number of distinct token IDs in the synthetic vocabulary (tokens are drawn from [0, vocab_size)).
+            seq_length (int): Length of the token sequence used as the model input (the dataset generates sequences of length `seq_length + 1` so inputs can be shifted to produce labels).
+            num_samples (int): Number of samples (sequences) available in the dataset.
+        """
         self.vocab_size = vocab_size
         self.seq_length = seq_length
         self.num_samples = num_samples
 
     def __len__(self) -> int:
+        """
+        Return the number of sequence samples available in this dataset.
+        
+        Returns:
+            int: The number of contiguous sequence samples available for indexing.
+        """
         return self.num_samples
 
     def __getitem__(self, idx: int):
+        """
+        Return a synthetic token sequence for the requested sample index.
+        
+        Parameters:
+            idx (int): Requested sample index; ignored because samples are generated randomly.
+        
+        Returns:
+            dict: A mapping with two 1-D tensors of length `self.seq_length`:
+                - "input_ids": token sequence (tokens[0:seq_length])
+                - "labels": next-token targets (tokens[1:seq_length+1])
+        """
         tokens = torch.randint(0, self.vocab_size, (self.seq_length + 1,))
         return {
             "input_ids": tokens[:-1],
@@ -127,7 +170,19 @@ class SyntheticDataset(Dataset):
 
 
 def get_lr(step: int, warmup_steps: int, max_steps: int, max_lr: float, min_lr: float) -> float:
-    """Cosine learning rate schedule with warmup."""
+    """
+    Compute the learning rate for a given training step using linear warmup followed by cosine decay.
+    
+    Parameters:
+        step (int): Current training step (may be greater than max_steps).
+        warmup_steps (int): Number of steps to linearly increase the learning rate from 0 to max_lr.
+        max_steps (int): Step at which decay is complete; if <= warmup_steps, the function returns min_lr.
+        max_lr (float): Peak learning rate reached after warmup.
+        min_lr (float): Minimum learning rate reached at or after max_steps.
+    
+    Returns:
+        float: The learning rate at `step`. During the first `warmup_steps` steps the rate grows linearly from 0 to `max_lr`; after warmup it decays smoothly to `min_lr` following a cosine schedule and is clamped so it does not go below `min_lr`.
+    """
     if step < warmup_steps:
         return max_lr * step / warmup_steps
     if max_steps <= warmup_steps:
@@ -139,12 +194,27 @@ def get_lr(step: int, warmup_steps: int, max_steps: int, max_lr: float, min_lr: 
 
 
 def count_parameters(model: nn.Module) -> int:
-    """Count trainable parameters in model."""
+    """
+    Calculate the number of trainable parameters in the model.
+    
+    Returns:
+        total (int): Total number of parameters where `requires_grad` is True.
+    """
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
 def load_config(config_path: Path) -> dict:
-    """Load YAML config file."""
+    """
+    Load and parse a YAML configuration file into a Python dict.
+    
+    If PyYAML is not installed, prints an installation hint and exits the process.
+    
+    Parameters:
+        config_path (Path): Filesystem path to the YAML configuration file.
+    
+    Returns:
+        dict: Parsed configuration dictionary from the YAML content.
+    """
     try:
         import yaml
     except ImportError:
@@ -155,7 +225,25 @@ def load_config(config_path: Path) -> dict:
 
 
 def merge_config_with_args(config: dict, args: argparse.Namespace) -> dict:
-    """Merge YAML config with command-line argument overrides."""
+    """
+    Apply command-line argument overrides onto a loaded YAML configuration dictionary.
+    
+    Parameters:
+        config (dict): Configuration dictionary loaded from YAML; modified in-place and returned.
+        args (argparse.Namespace): Parsed CLI arguments. The following attributes, when present or different
+            from their defaults, will override values in `config`:
+            - data_path -> config['data']['tokenized_path']
+            - batch_size -> config['training']['batch_size']
+            - seq_length -> config['training']['seq_length']
+            - max_steps -> config['training']['max_steps']
+            - lr -> config['training']['learning_rate']
+            - warmup_steps -> config['training']['warmup_steps']
+            - device -> config['training']['device']
+            - checkpoint_dir -> config['output_dir']
+    
+    Returns:
+        dict: The configuration dictionary with CLI overrides applied.
+    """
     # Command-line args override config file values
     if args.data_path:
         config.setdefault('data', {})['tokenized_path'] = args.data_path
@@ -177,7 +265,20 @@ def merge_config_with_args(config: dict, args: argparse.Namespace) -> dict:
 
 
 def get_default_config() -> dict:
-    """Return default configuration (paper-standard settings)."""
+    """
+    Provide a default training configuration with paper-standard model, memory, attention, training, data, weaver_metrics, and logging settings.
+    
+    Returns:
+        config (dict): Configuration dictionary with the following top-level keys:
+            - 'experiment', 'version', 'hypothesis': metadata strings.
+            - 'model': model architecture defaults (dimensions, layers, vocab, dropout, init).
+            - 'memory': memory module defaults (key/value dims, momentum/forget options, learnable flags).
+            - 'attention': attention defaults (heads, head dim, window, persistent tokens, implementation flags).
+            - 'training': optimizer and scheduler defaults (batch size, seq length, learning rates, warmup, max steps, betas, weight decay, grad clipping, device, dtype).
+            - 'data': data-related defaults (train/validation split).
+            - 'weaver_metrics': metrics collection defaults (enabled flag and sample rate).
+            - 'logging': logging and checkpointing intervals.
+    """
     return {
         'experiment': 'atlas_training',
         'version': '1.0',
@@ -241,6 +342,11 @@ def get_default_config() -> dict:
 
 
 def main():
+    """
+    Run the Atlas training loop with optional Weaver space metrics and checkpointing.
+    
+    Parses command-line arguments or a YAML config, prepares the run directory and device, constructs the Atlas model and datasets, and executes the training loop while capturing convergence and Weaver-space metrics. During training it updates the learning rate schedule, performs mixed-precision training as configured, logs periodic summaries to stdout, appends structured metrics to a JSONL file, and saves periodic and convergence-triggered checkpoints. Supports resuming from a checkpoint, cleaning previous runs, and writes a run-level config.json plus final checkpoints and metric summaries to the run directory. Exits early if required resources (e.g., CUDA) are unavailable.
+    """
     parser = argparse.ArgumentParser(description="Atlas Training with Metrics")
     parser.add_argument("--config", type=str, default=None, help="Path to YAML config file")
     parser.add_argument("--data-path", type=str, default=None, help="Path to tokenized data (.bin file)")

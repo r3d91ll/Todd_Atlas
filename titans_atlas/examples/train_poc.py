@@ -38,15 +38,40 @@ class SyntheticDataset(Dataset):
     """Synthetic dataset with random tokens for throughput testing."""
 
     def __init__(self, vocab_size: int, seq_length: int, num_samples: int = 10000):
+        """
+        Initialize the dataset.
+        
+        Parameters:
+            vocab_size (int): Number of distinct token IDs in the vocabulary.
+            seq_length (int): Number of input tokens per sample (each example will use a contiguous sequence of this length).
+            num_samples (int): Total number of samples the dataset exposes (default 10000).
+        """
         self.vocab_size = vocab_size
         self.seq_length = seq_length
         self.num_samples = num_samples
 
     def __len__(self) -> int:
+        """
+        Return the number of samples available in the dataset.
+        
+        Returns:
+            int: The total number of samples in the dataset.
+        """
         return self.num_samples
 
     def __getitem__(self, idx: int):
         # Generate random tokens
+        """
+        Return a randomly generated token example containing input tokens and next-token labels.
+        
+        Parameters:
+        	idx (int): Index of the sample (ignored; kept for Dataset compatibility).
+        
+        Returns:
+        	dict: A mapping with:
+        		- "input_ids" (torch.LongTensor): 1-D tensor of length `self.seq_length` with random token ids.
+        		- "labels" (torch.LongTensor): 1-D tensor of length `self.seq_length` containing the next-token targets (input_ids shifted left by one).
+        """
         tokens = torch.randint(0, self.vocab_size, (self.seq_length + 1,))
         return {
             "input_ids": tokens[:-1],
@@ -58,6 +83,20 @@ class TokenizedDataset(Dataset):
     """Dataset for pre-tokenized data stored as memory-mapped numpy array."""
 
     def __init__(self, data_path: str, seq_length: int):
+        """
+        Initialize the dataset by memory-mapping a `train.bin` file of token IDs and storing sequence configuration.
+        
+        Parameters:
+            data_path (str): Path to a directory containing a `train.bin` file of token IDs.
+            seq_length (int): Sequence length (number of tokens per example) used by the dataset.
+        
+        Notes:
+            - Expects `train.bin` to be a contiguous array of unsigned 16-bit token IDs; the file is loaded via numpy.memmap and assigned to `self.data`.
+            - Sets `self.num_tokens` to the total number of tokens found in `train.bin` and prints the loaded token count.
+        
+        Raises:
+            FileNotFoundError: If `train.bin` is not present at `data_path`.
+        """
         self.seq_length = seq_length
         self.data_path = Path(data_path)
 
@@ -72,9 +111,26 @@ class TokenizedDataset(Dataset):
             raise FileNotFoundError(f"Data file not found: {data_file}")
 
     def __len__(self) -> int:
+        """
+        Compute the number of token sequences available for sampling.
+        
+        Returns:
+            int: Number of sequences (total tokens divided by sequence length, floored).
+        """
         return self.num_tokens // self.seq_length
 
     def __getitem__(self, idx: int):
+        """
+        Retrieve the input-target token pair for a given dataset index.
+        
+        Parameters:
+        	idx (int): Sequence index; selects a contiguous block of tokens starting at `idx * seq_length`.
+        
+        Returns:
+        	dict: A mapping with:
+        		- "input_ids" (torch.Tensor): 1-D `torch.int64` tensor of length `seq_length` containing the input tokens.
+        		- "labels" (torch.Tensor): 1-D `torch.int64` tensor of length `seq_length` containing the target tokens (input shifted left by one).
+        """
         start = idx * self.seq_length
         end = start + self.seq_length + 1
         tokens = torch.from_numpy(self.data[start:end].astype('int64'))
@@ -85,7 +141,12 @@ class TokenizedDataset(Dataset):
 
 
 def get_lr(step: int, warmup_steps: int, max_steps: int, max_lr: float, min_lr: float) -> float:
-    """Cosine learning rate schedule with warmup."""
+    """
+    Compute the learning rate using a linear warmup followed by cosine decay.
+    
+    Returns:
+        The learning rate for the given `step` as a `float`. During the first `warmup_steps` it linearly increases from 0 to `max_lr`; after warmup it follows a cosine decay from `max_lr` down toward `min_lr`, and does not fall below `min_lr`.
+    """
     if step < warmup_steps:
         return max_lr * step / warmup_steps
 
@@ -96,11 +157,24 @@ def get_lr(step: int, warmup_steps: int, max_steps: int, max_lr: float, min_lr: 
 
 
 def count_parameters(model: nn.Module) -> int:
-    """Count trainable parameters."""
+    """
+    Compute the number of trainable parameters in a model.
+    
+    Parameters:
+        model (nn.Module): The model to inspect.
+    
+    Returns:
+        int: Total number of parameters with `requires_grad` set to True.
+    """
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
 def main():
+    """
+    Run a single-GPU proof-of-concept training run for the Atlas 36M model driven by command-line arguments.
+    
+    Parses CLI options to configure model, data source (synthetic tokens by default or pre-tokenized memory-mapped data), optimizer, precision (fp32/fp16/bf16), and training hyperparameters; builds the model and dataloader, runs the training loop with per-step learning-rate scheduling, mixed-precision/autocast handling, gradient clipping, periodic logging, and periodic checkpoint saves to the specified checkpoint directory, then writes a final checkpoint and prints peak GPU memory before exiting.
+    """
     parser = argparse.ArgumentParser(description="Atlas 36M Proof-of-Concept Training")
     parser.add_argument("--data-path", type=str, default=None, help="Path to tokenized data (if None, uses synthetic)")
     parser.add_argument("--batch-size", type=int, default=8, help="Batch size")

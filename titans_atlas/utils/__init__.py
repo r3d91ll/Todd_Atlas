@@ -89,7 +89,15 @@ class RotaryEmbedding(nn.Module):
 
     @staticmethod
     def _rotate_half(x: torch.Tensor) -> torch.Tensor:
-        """Rotate half the hidden dims."""
+        """
+        Rotate the last dimension by swapping its two equal halves and negating the first of those halves.
+        
+        Parameters:
+            x (torch.Tensor): Input tensor whose size along the last dimension is even.
+        
+        Returns:
+            torch.Tensor: Tensor with the same shape as `x` where the last-dimension halves are reordered as `[-x2, x1]`.
+        """
         x1, x2 = x.chunk(2, dim=-1)
         return torch.cat([-x2, x1], dim=-1)
 
@@ -109,12 +117,28 @@ class RMSNorm(nn.Module):
     """
 
     def __init__(self, dim: int, eps: float = 1e-6):
+        """
+        Initialize the RMSNorm module with a learnable per-dimension scale and numerical-stability epsilon.
+        
+        Parameters:
+            dim (int): Size of the normalized feature dimension; creates a learnable weight of shape (dim,).
+            eps (float): Small constant added to the denominator to avoid division by zero.
+        """
         super().__init__()
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(dim))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # RMS = sqrt(mean(x^2))
+        """
+        Apply Root Mean Square (RMS) normalization to the input using a per-dimension scale.
+        
+        Parameters:
+            x (torch.Tensor): Input tensor with last dimension equal to the RMSNorm `dim`; shape (..., dim).
+        
+        Returns:
+            torch.Tensor: The input normalized by the root-mean-square over the last dimension and scaled by the learnable per-dimension weight; same shape as `x`.
+        """
         rms = torch.sqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
         return x / rms * self.weight
 

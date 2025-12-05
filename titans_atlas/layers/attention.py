@@ -365,6 +365,13 @@ class GatedAttentionUnit(nn.Module):
         d_model: int,
         activation: str = "silu",
     ):
+        """
+        Initialize the gated attention unit, setting up projections, activation, and output normalization.
+        
+        Parameters:
+            d_model (int): Dimensionality of the model / hidden representation.
+            activation (str): Activation to use for the gating pathway; supported values are `"silu"` and `"gelu"`. Defaults to `"silu"`.
+        """
         super().__init__()
         self.d_model = d_model
 
@@ -381,14 +388,17 @@ class GatedAttentionUnit(nn.Module):
         memory_output: Tensor,
     ) -> Tensor:
         """
-        Combine attention and memory outputs via gating.
-
-        Args:
-            attention_output: (batch, seq_len, d_model) from attention branch
-            memory_output: (batch, seq_len, d_model) from memory branch
-
+        Blend attention and memory outputs using a learned sigmoid gate.
+        
+        The gating value is computed from the concatenation of the two inputs and used to interpolate
+        between the attention and memory branches; the resulting tensor is normalized before return.
+        
+        Parameters:
+            attention_output (Tensor): Attention branch output with shape (batch, seq_len, d_model).
+            memory_output (Tensor): Memory branch output with shape (batch, seq_len, d_model).
+        
         Returns:
-            gated_output: (batch, seq_len, d_model)
+            Tensor: Gated and normalized output with shape (batch, seq_len, d_model).
         """
         # Concatenate for gate computation
         combined = torch.cat([attention_output, memory_output], dim=-1)

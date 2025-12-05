@@ -60,6 +60,18 @@ class TextDataset(Dataset):
         seq_length: int,
         split: str = "train",
     ):
+        """
+        Initialize the dataset for pretraining by loading a memory-mapped token file or falling back to generated test data.
+        
+        Parameters:
+            data_path (str): Path to the directory containing pre-tokenized binary files.
+            seq_length (int): Sequence length (number of tokens per example).
+            split (str): Dataset split name; expects a file named `<split>.bin` containing uint16 token values.
+        
+        Notes:
+            - If `<split>.bin` exists, it is memory-mapped as a numpy array of dtype `uint16` and exposed as `self.data`; `self.num_tokens` is set to the file's token count.
+            - If the file is missing, `self.data` is set to `None` and `self.num_tokens` is set to 1_000_000 for testing purposes.
+        """
         self.seq_length = seq_length
         self.data_path = Path(data_path)
 
@@ -76,9 +88,27 @@ class TextDataset(Dataset):
             self.num_tokens = 1_000_000  # 1M tokens for testing
 
     def __len__(self) -> int:
+        """
+        Number of sequences available in the dataset.
+        
+        Returns:
+            int: The number of sequences computed as total token count divided by sequence length.
+        """
         return self.num_tokens // self.seq_length
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        """
+        Retrieve a token sequence pair (inputs and next-token labels) for the given sequence index.
+        
+        Parameters:
+            idx (int): Zero-based sequence index; the sequence spans tokens [idx * seq_length : idx * seq_length + seq_length + 1].
+        
+        Returns:
+            dict: A dictionary with:
+                - "input_ids" (torch.Tensor): Token sequence of length `seq_length` representing model inputs.
+                - "labels" (torch.Tensor): Token sequence of length `seq_length` representing next-token targets (inputs shifted left by one).
+            Both tensors are integer tensors (dtype int64). If no memmapped data is available, tokens are randomly sampled in range [0, 50257).
+        """
         start = idx * self.seq_length
         end = start + self.seq_length + 1  # +1 for labels shift
 
@@ -95,7 +125,16 @@ class TextDataset(Dataset):
 
 
 def get_lr(step: int, config: TrainingConfig) -> float:
-    """Cosine learning rate schedule with warmup."""
+    """
+    Compute the learning rate for a given training step using linear warmup followed by cosine decay to a minimum learning rate.
+    
+    Parameters:
+        step (int): Current training step index (0-based).
+        config (TrainingConfig): Configuration providing `warmup_steps`, `max_steps`, `learning_rate`, and `min_lr`.
+    
+    Returns:
+        float: Learning rate for the given step. Rises linearly from 0 to `learning_rate` over `warmup_steps`, then follows a cosine decay from `learning_rate` to `min_lr` between `warmup_steps` and `max_steps` (clamped at `min_lr` after `max_steps`).
+    """
     if step < config.warmup_steps:
         # Linear warmup
         return config.learning_rate * step / config.warmup_steps
@@ -108,12 +147,13 @@ def get_lr(step: int, config: TrainingConfig) -> float:
 
 
 def setup_distributed() -> tuple[int, int, int]:
-    """Initialize distributed training.
-
+    """
+    Set up the PyTorch distributed training environment for the current process.
+    
     Returns:
-        rank: Global rank of this process
-        local_rank: Local rank on this node
-        world_size: Total number of processes
+        rank (int): Global rank of this process.
+        local_rank (int): Local GPU index for this process on the current node.
+        world_size (int): Total number of processes participating in the job.
     """
     if "RANK" in os.environ:
         # Launched with torchrun
@@ -137,7 +177,12 @@ def cleanup_distributed():
 
 
 def count_parameters(model: nn.Module) -> int:
-    """Count trainable parameters."""
+    """
+    Compute the total number of trainable parameters in a PyTorch module.
+    
+    Returns:
+        int: Total count of parameters where `requires_grad` is True.
+    """
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
@@ -151,7 +196,22 @@ def save_checkpoint(
     metrics: Dict[str, float],
     path: Path,
 ):
-    """Save training checkpoint."""
+    """
+    Save the current training state to a checkpoint file.
+    
+    Parameters:
+        model (nn.Module): Model to save; may be a DistributedDataParallel-wrapped module.
+        optimizer (torch.optim.Optimizer): Optimizer whose state will be stored.
+        scaler (GradScaler): GradScaler for mixed-precision training whose state will be stored.
+        step (int): Current training step number to record in the checkpoint.
+        config (TrainingConfig): Training configuration to include in the checkpoint.
+        model_config (AtlasConfig): Model configuration to include in the checkpoint.
+        metrics (Dict[str, float]): Latest training metrics to include in the checkpoint (e.g., loss, throughput).
+        path (Path): Filesystem path where the checkpoint file will be written.
+    
+    The checkpoint file contains the following keys: "step", "model_state_dict", "optimizer_state_dict",
+    "scaler_state_dict", "training_config", "model_config", and "metrics".
+    """
     # Get raw model from DDP wrapper
     raw_model = model.module if isinstance(model, DDP) else model
 
@@ -174,7 +234,18 @@ def load_checkpoint(
     optimizer: Optional[torch.optim.Optimizer] = None,
     scaler: Optional[GradScaler] = None,
 ) -> Dict[str, Any]:
-    """Load training checkpoint."""
+    """
+    Load a training checkpoint from disk and restore model, optimizer, and scaler states.
+    
+    Parameters:
+    	path (Path): Filesystem path to the checkpoint file.
+    	model (nn.Module): Model to restore; if wrapped in DistributedDataParallel, the underlying module will be loaded.
+    	optimizer (Optional[torch.optim.Optimizer]): Optimizer to restore state into, if provided.
+    	scaler (Optional[GradScaler]): GradScaler to restore state into, if provided.
+    
+    Returns:
+    	checkpoint (Dict[str, Any]): The loaded checkpoint dictionary (contains at least `model_state_dict` and may include `optimizer_state_dict`, `scaler_state_dict`, training/config metadata, and metrics).
+    """
     checkpoint = torch.load(path, map_location="cpu")
 
     # Get raw model from DDP wrapper
@@ -195,7 +266,16 @@ def train(
     train_config: TrainingConfig,
     resume_from: Optional[str] = None,
 ):
-    """Main training loop."""
+    """
+    Run the end-to-end training loop for an Atlas model, including distributed/mixed-precision support, logging, and checkpointing.
+    
+    This function trains the provided Atlas model according to the settings in train_config: it configures distributed training and device placement, prepares the optimizer with selective weight decay, enables mixed precision (FP16/BF16/FP32) and gradient scaling, loads the training dataset and dataloader (with optional DistributedSampler), supports gradient accumulation and gradient clipping, updates a cosine-with-warmup learning rate schedule, periodically saves checkpoints (including a persistent "latest" and a final checkpoint), and optionally logs metrics to Weights & Biases. The process will resume from a checkpoint if resume_from is a valid path. Training runs until train_config.max_steps and performs distributed cleanup on completion.
+    
+    Parameters:
+        model_config (AtlasConfig): Configuration for constructing the Atlas model.
+        train_config (TrainingConfig): Training hyperparameters and runtime settings (data paths, batch sizes, learning rate schedule, precision, checkpointing, logging, etc.). The function will update train_config.world_size with the detected world size.
+        resume_from (Optional[str]): Path to a checkpoint file to resume training from; if None or the path does not exist, training starts from step 0.
+    """
 
     # Setup distributed
     rank, local_rank, world_size = setup_distributed()
@@ -438,6 +518,11 @@ def train(
 
 
 def main():
+    """
+    Parse command-line arguments, build the chosen model and training configurations, and launch training.
+    
+    Accepts flags for model size, precision, micro-batch size, gradient accumulation, sequence length, maximum steps, learning rate, checkpoint directory, data path, optional WandB project, and an optional checkpoint to resume from. Selects the corresponding Atlas model preset, constructs a TrainingConfig from the provided arguments, and calls train(...) with the assembled configurations.
+    """
     parser = argparse.ArgumentParser(description="Train Atlas model")
     parser.add_argument(
         "--model-size",
