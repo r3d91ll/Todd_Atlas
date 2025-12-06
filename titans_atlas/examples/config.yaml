@@ -1,0 +1,77 @@
+# Atlas Training Configuration
+# Paper-standard hyperparameters with cosine LR schedule
+#
+# Usage:
+#   python train_with_metrics.py --config config.yaml
+#
+# Or override specific values via command-line:
+#   python train_with_metrics.py --config config.yaml --batch-size 32 --device cuda:1
+
+experiment: atlas_training
+version: "1.0"
+hypothesis: "Train Atlas with paper-standard hyperparameters"
+
+# Model Architecture (36M parameters)
+model:
+  d_model: 512
+  num_layers: 6
+  context_window: 64      # Paper recommendation
+  polynomial_degree: 2
+  vocab_size: 32000       # BPE-32K tokenizer
+  max_seq_len: 1024
+  ffn_hidden_dim: 2048    # 4x d_model
+  dropout: 0.0
+  init_std: 0.02
+
+# Memory Module (Titans-style TTT memory)
+memory:
+  d_key: 64
+  d_value: 64
+  num_memory_layers: 2
+  use_momentum: true
+  use_forget_gate: true
+  learnable_lr: true
+  learnable_momentum: true
+  learnable_forget: true
+
+# Attention
+attention:
+  num_heads: 8
+  d_head: 64              # d_model / num_heads
+  window_size: 512
+  num_persistent_tokens: 8
+  use_flash_attention: false  # Set true for faster training if flash-attn installed
+  use_rotary_embeddings: true
+  use_qkv_conv: true
+
+# Training - Paper standard: LR=1e-4 with 10% warmup, cosine decay
+training:
+  batch_size: 64
+  seq_length: 256
+  learning_rate: 1e-4     # Paper standard
+  min_lr: 1e-5            # Cosine decay to 10% of peak
+  warmup_steps: 5000      # 10% warmup (of 50k steps)
+  max_steps: 50000
+  weight_decay: 0.1
+  grad_clip: 1.0
+  beta1: 0.9
+  beta2: 0.95
+  device: "cuda:0"        # Change to cuda:1 for second GPU
+  dtype: "bfloat16"       # Options: bfloat16, float16, float32
+
+# Data
+data:
+  # Path to tokenized data file (.bin format, uint16 tokens)
+  # Generate with: python tokenize_data.py --input data.txt --output train.bin
+  tokenized_path: "./data/train.bin"
+  train_split: 0.9        # 90% train, 10% validation
+
+# Weaver Space Metrics (research metrics for analysis)
+weaver_metrics:
+  enabled: true
+  sample_rate: 100        # Capture every N steps
+
+# Logging
+logging:
+  log_interval: 10        # Print metrics every N steps
+  save_interval: 5000     # Save checkpoint every N steps

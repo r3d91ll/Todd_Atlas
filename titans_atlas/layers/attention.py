@@ -22,6 +22,7 @@ from titans_atlas.utils import (
     DepthwiseConv1d,
     create_causal_mask,
     create_sliding_window_mask,
+    RMSNorm,
 )
 
 
@@ -371,8 +372,8 @@ class GatedAttentionUnit(nn.Module):
         self.gate_proj = nn.Linear(d_model * 2, d_model)
         self.activation = nn.SiLU() if activation == "silu" else nn.GELU()
 
-        # Output normalization
-        self.layer_norm = nn.LayerNorm(d_model)
+        # Output normalization (RMSNorm for faster training)
+        self.layer_norm = RMSNorm(d_model)
 
     def forward(
         self,
