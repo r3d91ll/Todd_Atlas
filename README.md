@@ -4,6 +4,22 @@ PyTorch implementation of the Atlas neural long-term memory architecture from:
 
 **Atlas**: [Learning to Optimally Memorize the Context at Test Time](https://arxiv.org/abs/2505.23735) (arXiv:2505.23735)
 
+---
+
+## Current Status: Experiments Paused
+
+**December 2025**: After extensive experimentation (v01-v04), we discovered that Atlas at 43M parameters on 831M tokens leads to rapid memorization rather than generalization. See [Experiment Summary](docs/experiments/EXPERIMENT_SUMMARY.md) for details.
+
+**Key Findings**:
+1. Atlas requires significantly more parameters (500M+) for the memory mechanisms to function without overfitting
+2. Muon-style spectral normalization is required for 4K+ context stability
+3. `model.eval()` breaks the architecture (undocumented train-mode dependency)
+4. PPL decline **rate** is a better early-overfit detector than absolute values
+
+**Current Direction**: Pivoting to BDH (Hebbian learning) architecture at 100M scale for continued research.
+
+---
+
 ## Overview
 
 Atlas introduces neural memory modules that learn to memorize context at test time through gradient-based optimization. Key innovations:
@@ -94,32 +110,50 @@ Where:
 | **OmegaNet** | Omega rule with standard gradient descent |
 | **DeepTransformer** | Backbone combining Atlas memory + sliding window attention |
 
-## Key Components
+## Experiment Results (December 2025)
 
-### Polynomial Features
+### Summary
 
-```python
-from titans_atlas.models.atlas import PolynomialFeatures
+| Experiment | Config | Outcome |
+|------------|--------|---------|
+| v01 | 256 seq, homegrown data | PPL ~200 (data quality issue) |
+| v02 | 4K seq, Dolma, Muon fix | PPL 296 @ 5.6K steps (overfit) |
+| v03 | + Dropout 0.1 | Same decline rate (killed @ 3K) |
+| v04 | + SlowLR schedule | NaN @ step 110-250 |
 
-phi = PolynomialFeatures(input_dim=64, degree=2)
-# Maps 64-dim input to O(64²) dimensional features
-features = phi(keys)  # Superlinear capacity
-```
+### Key Discoveries
 
-### Omega Rule
+1. **Muon Normalization Required** (applied in v02):
+   ```python
+   # OmegaRule.forward() - spectral normalization for stability
+   U, S, V = torch.linalg.svd(grad, full_matrices=False)
+   grad_normalized = U @ V
+   self.M = self.M - self.learning_rate * grad_normalized
+   ```
 
-```python
-from titans_atlas.models.atlas import OmegaRule
+2. **PPL Decline Rate as Overfit Detector**:
+   - Healthy: Gradual decline, rate decreasing
+   - Overfit: Constant/accelerating rate (40-120%/100 steps)
 
-omega = OmegaRule(
-    d_key=64,
-    d_value=64,
-    context_window=64,
-    polynomial_degree=2,
-)
+3. **model.eval() Breaks Atlas**:
+   - Cannot disable dropout during warmup
+   - Architecture has train-mode dependencies
 
-output, memory_state = omega(keys, values, queries)
-```
+### Root Cause
+
+43M params on 831M tokens = 19.3 tokens/param (Chinchilla minimum ~20). Any architectural inefficiency tips into memorization.
+
+### Recommendations
+
+For future Atlas work:
+- Scale to 500M+ parameters
+- Use 10B+ tokens (not 831M)
+- Monitor generalization gap with held-out validation
+- Investigate model.eval() dependencies
+
+See [docs/experiments/EXPERIMENT_SUMMARY.md](docs/experiments/EXPERIMENT_SUMMARY.md) for full analysis.
+
+---
 
 ## Configuration Presets
 
@@ -238,7 +272,46 @@ This implementation is part of a research portfolio exploring memory-augmented a
 
 - **Todd_MemRAG**: Industry-standard RAG with embedding-based retrieval
 - **[Todd_Titans](https://github.com/r3d91ll/Todd_Titans)**: Titans paper implementation (archived reference)
-- **Todd_Atlas**: This repo - Atlas with continuous memory (active development)
+- **Todd_Atlas**: This repo - Atlas with continuous memory (experiments paused)
+- **BDH**: Baby Dragon Hatchling - Hebbian learning architecture (current focus)
+
+## Future Directions
+
+### Potential Explorations (if resuming Atlas)
+
+1. **Scale Experiments**:
+   - 500M+ parameter model on larger dataset (FineWeb, SlimPajama)
+   - Validate if memorization is purely a capacity issue
+
+2. **Architecture Modifications**:
+   - Add explicit regularization to memory modules
+   - Test different polynomial degrees
+   - Investigate Taylor kernel alternatives
+
+3. **Weaver Space Analysis**:
+   - Capture memory state trajectories
+   - Analyze attention geometry evolution
+   - Measure manifold curvature during training
+
+4. **Long-Context Validation**:
+   - Test on BABILong benchmark
+   - Compare memory retrieval accuracy vs. standard attention
+   - Measure inference latency at 1M+ tokens
+
+### Current Research Direction
+
+We are currently exploring **BDH (Baby Dragon Hatchling)** as an alternative architecture:
+
+- **Location**: `/home/todd/olympus/AshesBelow/experiments/BDH_100M/`
+- **Architecture**: 100M params, Hebbian learning, shared parameters
+- **Hypothesis**: Hebbian gating provides natural regularization
+
+The BDH approach offers:
+- Natural regularization via sparse Hebbian gating
+- Shared parameters prevent layer-specific memorization
+- Simpler architecture without test-time optimization
+
+---
 
 ## Citation
 
