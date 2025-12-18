@@ -4,6 +4,7 @@
 **Run ID:** atlas_300m_omega
 **Completed:** December 17, 2024
 **Duration:** 6.75 days (162 hours)
+**GPU:** 1x RTX A6000 Ampere
 
 ---
 
