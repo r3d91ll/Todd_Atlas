@@ -152,9 +152,11 @@ See [1B Build Plan](docs/1B_BUILD_PLAN.md) for details.
 
 ## Related
 
-- [Titans Paper](https://arxiv.org/abs/2501.00663)
-- [Miras Paper](https://arxiv.org/abs/2501.01951)
-- [TNT Paper](https://arxiv.org/abs/2501.02116)
+- [Titans Paper](https://arxiv.org/abs/2501.00663) - Test-time memorization via gradient-based updates
+- [Miras Paper](https://arxiv.org/abs/2501.01951) - "It's All Connected" - 4 design axes framework
+- [TNT Paper](https://arxiv.org/abs/2501.02116) - Hierarchical training, 17x speedup
+- [ATLAS Paper](https://arxiv.org/abs/2501.02739) - Optimal memory allocation at inference
+- [Nested Learning Paper](https://arxiv.org/abs/2501.03739) - Architecture = optimization at different levels
 
 ---
 
