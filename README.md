@@ -1,329 +1,161 @@
-# Atlas: Learning to Optimally Memorize at Test Time
+# Atlas: Miras Framework Implementation
 
-PyTorch implementation of the Atlas neural long-term memory architecture from:
+A minimal, observable implementation of the Behrouz et al. memory architecture framework (Titans/Miras).
 
-**Atlas**: [Learning to Optimally Memorize the Context at Test Time](https://arxiv.org/abs/2505.23735) (arXiv:2505.23735)
+## Current Status
+
+| Model | Parameters | Status | Report |
+|-------|------------|--------|--------|
+| 300M Omega | 389.5M | **Completed** | [Training Report](runs/atlas_300m_omega/TRAINING_REPORT.md) |
+| 1B Omega | ~1B | Planning | [Build Plan](docs/1B_BUILD_PLAN.md) |
+
+### 300M Results Summary
+
+- **Final PPL:** 229
+- **Training Time:** 38.9 hours
+- **Key Finding:** Gate collapse phenomenon - model learned to bypass memory (99.3% attention, 0.7% memory)
+- **Conclusion:** Architecture validated, but 389M insufficient for coherent generation. Scaling to 1B.
+
+See the full [300M Training Report](runs/atlas_300m_omega/TRAINING_REPORT.md) for detailed analysis.
 
 ---
 
-## Current Status: Experiments Paused
+## Framework Reference
 
-**December 2025**: After extensive experimentation (v01-v04), we discovered that Atlas at 43M parameters on 831M tokens leads to rapid memorization rather than generalization. See [Experiment Summary](docs/experiments/EXPERIMENT_SUMMARY.md) for details.
+Based on five papers from Behrouz, Zhong, Mirrokni et al. (Google Research):
 
-**Key Findings**:
-1. Atlas requires significantly more parameters (500M+) for the memory mechanisms to function without overfitting
-2. Muon-style spectral normalization is required for 4K+ context stability
-3. `model.eval()` breaks the architecture (undocumented train-mode dependency)
-4. PPL decline **rate** is a better early-overfit detector than absolute values
+| Paper | Key Contribution |
+|-------|------------------|
+| **Titans** | Test-time memorization via gradient-based updates |
+| **It's All Connected** | Miras framework - 4 design axes |
+| **ATLAS** | Optimal memory allocation at inference |
+| **TNT** | Hierarchical training, 17x speedup |
+| **Nested Learning** | Architecture = optimization at different levels |
 
-**Current Direction**: Pivoting to BDH (Hebbian learning) architecture at 100M scale for continued research.
+## Architecture (Miras Framework)
 
----
+Strict adherence to the 4-axis design:
 
-## Overview
+| Axis | Choice | Implementation |
+|------|--------|----------------|
+| **Memory** | Matrix-valued M | `src/model/memory.py` |
+| **Attentional Bias** | L2 (baseline) | Squared error objective |
+| **Retention Gate** | Local + Global | `src/model/retention.py` |
+| **Learning Algorithm** | Momentum (beta=0.9) | With Q-K projection from TNT |
 
-Atlas introduces neural memory modules that learn to memorize context at test time through gradient-based optimization. Key innovations:
+### Memory Module
 
-- **Omega Rule**: Sliding window context optimization instead of per-token updates
-- **Polynomial Features**: φ_p(x) expansion for O(d_k^p) capacity scaling
-- **Muon Optimizer**: Second-order approximation for stable memory updates
-- **Deep Memory MLPs**: Superlinear capacity O(d_k * d_v)
-- **Learnable Taylor Kernel**: Softmax approximation with learnable coefficients
+Each layer maintains:
+- **M**: Memory matrix [batch, d_key, d_value] - associative storage
+- **S**: Surprise accumulator [batch, d_key, d_value] - gradient momentum
+- **Gates**: Input-dependent alpha, eta, theta for retention control
 
-## Installation
+## Training Strategy (TNT Two-Stage)
 
-```bash
-pip install -r requirements.txt
+| Stage | Chunk Size | Steps | Purpose |
+|-------|------------|-------|---------|
+| **Stage 1** | 2048 | 100,000 | Bulk pre-training with memory resets |
+| **Stage 2** | 256 | 10,000 | Fine-grained accuracy tuning |
+
+## Directory Structure
+
+```
+Atlas/
+├── README.md
+├── CLAUDE.md                    # Development context
+├── configs/
+│   ├── atlas_50m.yaml           # Original 50M config
+│   └── atlas_300m_omega.yaml    # 300M Omega config
+├── docs/
+│   ├── ARCHITECTURE.md          # Design document
+│   └── 1B_BUILD_PLAN.md         # 1B scaling plan
+├── src/
+│   ├── model/
+│   │   ├── atlas_omega.py       # AtlasOmega model
+│   │   ├── memory.py            # TitansMemory module
+│   │   ├── attention.py         # Sliding window attention
+│   │   └── retention.py         # Retention gates
+│   ├── data/
+│   │   └── loader.py            # Dolmino dataset loader
+│   └── training/
+│       ├── trainer.py           # TNT trainer
+│       └── metrics.py           # Observability metrics
+├── scripts/
+│   ├── train_ddp_omega.py       # Main training script
+│   └── test_inference.py        # Inference testing
+├── runs/
+│   └── atlas_300m_omega/        # 300M run artifacts
+│       ├── TRAINING_REPORT.md   # Full analysis
+│       ├── checkpoints/         # Model checkpoints
+│       └── metrics/             # Training metrics (JSONL)
+└── tokenizer/
+    └── atlas_tokenizer/         # LLaMA tokenizer
 ```
 
 ## Quick Start
 
-### Atlas Language Model
+```bash
+# Setup
+cd /home/todd/olympus/models/Atlas
+source venv/bin/activate
 
-```python
-from titans_atlas import Atlas
-from titans_atlas.configs import AtlasConfig
+# Run inference on trained model
+python scripts/test_inference.py \
+  --checkpoint runs/atlas_300m_omega/checkpoints/checkpoint_110000.pt \
+  --prompt "Once upon a time" \
+  --device cuda:0
 
-config = AtlasConfig(
-    d_model=512,
-    num_layers=12,
-    context_window=64,
-    polynomial_degree=2,
-    vocab_size=32000,
-)
-
-model = Atlas(config)
-outputs = model(input_ids=tokens, labels=labels)
-loss = outputs["loss"]
-
-# Generation
-generated = model.generate(prompt_tokens, max_new_tokens=100)
+# Train new model
+CUDA_VISIBLE_DEVICES=1 python scripts/train_ddp_omega.py \
+  --config configs/atlas_300m_omega.yaml \
+  --output-dir runs/my_run
 ```
 
-### DeepTransformer Backbone
+## Key Findings from 300M Run
 
-```python
-from titans_atlas import DeepTransformer
-from titans_atlas.configs import AtlasConfig
+### Gate Collapse
 
-config = AtlasConfig(
-    d_model=512,
-    num_layers=12,
-    context_window=64,
-    polynomial_degree=2,
-)
+The most significant observation: gates progressively collapsed during training.
 
-model = DeepTransformer(config)
-output, memory_states = model(x)  # x: (batch, seq_len, d_model)
-```
+| Step | Avg Gate | Memory Usage |
+|------|----------|--------------|
+| 639 | 50.1% | Balanced |
+| 33K | 11.7% | Attention favored |
+| 76K | 0.7% | Memory bypassed |
+| 109K | 0.7% | Memory bypassed |
 
-## Architecture
+**Implication:** Model optimized for attention, ignored memory. Needs regularization.
 
-### Core Components
+### Observability Metrics
 
-| Component | Description |
-|-----------|-------------|
-| **OmegaRule** | Sliding window optimization: min_M Σ γ_i · ℓ(M; k_i, v_i) |
-| **PolynomialFeatures** | φ_p(x) = [x^β]_{|β|≤p} for capacity scaling |
-| **MuonOptimizer** | Momentum + spectral normalization for memory updates |
-| **DeepMemory** | Multi-layer MLP with O(d_k * d_v) capacity |
-| **LearnableTaylorKernel** | exp(x) ≈ Σ a_i x^i approximation |
+Per-layer metrics logged every step:
+- `M_norm`, `M_std`, `M_max` - Memory matrix state
+- `S_norm` - Surprise accumulator activity
+- `gate_mean`, `gate_std` - Attention/memory balance
 
-### Atlas Memory Update
+## Next Steps
 
-The Omega rule optimizes memory over a sliding window:
+1. **1B Build** - Scale up with gate regularization
+2. **Cloud Deployment** - H100/H200 on RunPod (~$60-100)
+3. **TCF Metrics** - Add geometric analysis (D_eff, beta, curvature)
+4. **Telegram Alerts** - Replace SMS notifications
 
-```
-min_M Σ_{i=t-c+1}^{t} γ_i^(t) · ||M(k_i) - v_i||²
-```
+See [1B Build Plan](docs/1B_BUILD_PLAN.md) for details.
 
-Where:
-- `c`: context window length
-- `γ_i^(t)`: learned decay weights for token importance
-- `M`: deep memory network
+## Hardware
 
-### Model Variants
+| GPU | VRAM | Use Case |
+|-----|------|----------|
+| RTX A6000 (local) | 48GB | 300M training, inference |
+| H100 (cloud) | 80GB | 1B training |
+| H200 (cloud) | 141GB | 1B training (faster) |
 
-| Model | Description |
-|-------|-------------|
-| **Atlas** | Full model with Muon optimizer |
-| **OmegaNet** | Omega rule with standard gradient descent |
-| **DeepTransformer** | Backbone combining Atlas memory + sliding window attention |
+## Related
 
-## Experiment Results (December 2025)
-
-### Summary
-
-| Experiment | Config | Outcome |
-|------------|--------|---------|
-| v01 | 256 seq, homegrown data | PPL ~200 (data quality issue) |
-| v02 | 4K seq, Dolma, Muon fix | PPL 296 @ 5.6K steps (overfit) |
-| v03 | + Dropout 0.1 | Same decline rate (killed @ 3K) |
-| v04 | + SlowLR schedule | NaN @ step 110-250 |
-
-### Key Discoveries
-
-1. **Muon Normalization Required** (applied in v02):
-   ```python
-   # OmegaRule.forward() - spectral normalization for stability
-   U, S, V = torch.linalg.svd(grad, full_matrices=False)
-   grad_normalized = U @ V
-   self.M = self.M - self.learning_rate * grad_normalized
-   ```
-
-2. **PPL Decline Rate as Overfit Detector**:
-   - Healthy: Gradual decline, rate decreasing
-   - Overfit: Constant/accelerating rate (40-120%/100 steps)
-
-3. **model.eval() Breaks Atlas**:
-   - Cannot disable dropout during warmup
-   - Architecture has train-mode dependencies
-
-### Root Cause
-
-43M params on 831M tokens = 19.3 tokens/param (Chinchilla minimum ~20). Any architectural inefficiency tips into memorization.
-
-### Recommendations
-
-For future Atlas work:
-- Scale to 500M+ parameters
-- Use 10B+ tokens (not 831M)
-- Monitor generalization gap with held-out validation
-- Investigate model.eval() dependencies
-
-See [docs/experiments/EXPERIMENT_SUMMARY.md](docs/experiments/EXPERIMENT_SUMMARY.md) for full analysis.
+- [Titans Paper](https://arxiv.org/abs/2501.00663)
+- [Miras Paper](https://arxiv.org/abs/2501.01951)
+- [TNT Paper](https://arxiv.org/abs/2501.02116)
 
 ---
 
-## Configuration Presets
-
-```python
-from titans_atlas.configs import atlas_small, atlas_medium, atlas_large
-
-config = atlas_small()   # ~170M params
-config = atlas_medium()  # ~400M params
-config = atlas_large()   # ~760M params
-```
-
-## Performance
-
-From the paper:
-- Atlas achieves +80% accuracy improvement on 10M context BABILong
-- Handles sequences >2M tokens with linear-time inference
-- Maintains competitive performance on standard benchmarks
-
-## Training
-
-### Quick Start Training
-
-```bash
-cd titans_atlas/examples
-
-# 1. Prepare data (tokenize text into binary format)
-python tokenize_data.py --input /path/to/data.txt --output ./data/
-
-# 2. Train with paper-standard settings (recommended)
-python train_with_metrics.py --config config.yaml
-
-# Or train with command-line arguments:
-python train_with_metrics.py \
-    --data-path ./data/train.bin \
-    --batch-size 64 \
-    --seq-length 256 \
-    --max-steps 50000
-```
-
-### Paper-Standard Hyperparameters
-
-The default configuration uses settings from the Atlas paper:
-
-| Parameter | Value | Notes |
-|-----------|-------|-------|
-| Learning Rate | 1e-4 | Peak LR |
-| Warmup Steps | 5000 | 10% of training |
-| LR Schedule | Cosine | Decays to 1e-5 |
-| Batch Size | 64 | Per-GPU |
-| Sequence Length | 256 | Tokens per sample |
-| Context Window | 64 | Memory window size |
-| Weight Decay | 0.1 | AdamW |
-
-### Configuration File
-
-Create a YAML config for full control:
-
-```yaml
-# config.yaml
-experiment: my_experiment
-model:
-  d_model: 512
-  num_layers: 6
-  context_window: 64
-  vocab_size: 32000
-training:
-  batch_size: 64
-  seq_length: 256
-  learning_rate: 1e-4
-  warmup_steps: 5000
-  max_steps: 50000
-data:
-  tokenized_path: "./data/train.bin"
-```
-
-### Monitoring Training
-
-The training script outputs JSONL metrics compatible with various dashboards:
-
-```bash
-# Watch training progress
-tail -f runs/atlas/TIMESTAMP/metrics.jsonl
-
-# Or use the included dashboard
-streamlit run dashboard.py --server.port 8050
-```
-
-### Resume Training
-
-```bash
-python train_with_metrics.py \
-    --config config.yaml \
-    --resume-from runs/atlas/TIMESTAMP/checkpoints/checkpoint_010000.pt
-```
-
-### Multi-GPU Training
-
-Set the device in config or via command-line:
-
-```bash
-# Single GPU (GPU 1)
-python train_with_metrics.py --config config.yaml --device cuda:1
-
-# For DataParallel, use separate processes per GPU (Atlas memory doesn't support DP)
-```
-
-## Tests
-
-```bash
-python -m pytest titans_atlas/tests/ -v
-```
-
-## Project Context
-
-This implementation is part of a research portfolio exploring memory-augmented architectures:
-
-- **Todd_MemRAG**: Industry-standard RAG with embedding-based retrieval
-- **[Todd_Titans](https://github.com/r3d91ll/Todd_Titans)**: Titans paper implementation (archived reference)
-- **Todd_Atlas**: This repo - Atlas with continuous memory (experiments paused)
-- **BDH**: Baby Dragon Hatchling - Hebbian learning architecture (current focus)
-
-## Future Directions
-
-### Potential Explorations (if resuming Atlas)
-
-1. **Scale Experiments**:
-   - 500M+ parameter model on larger dataset (FineWeb, SlimPajama)
-   - Validate if memorization is purely a capacity issue
-
-2. **Architecture Modifications**:
-   - Add explicit regularization to memory modules
-   - Test different polynomial degrees
-   - Investigate Taylor kernel alternatives
-
-3. **Weaver Space Analysis**:
-   - Capture memory state trajectories
-   - Analyze attention geometry evolution
-   - Measure manifold curvature during training
-
-4. **Long-Context Validation**:
-   - Test on BABILong benchmark
-   - Compare memory retrieval accuracy vs. standard attention
-   - Measure inference latency at 1M+ tokens
-
-### Current Research Direction
-
-We are currently exploring **BDH (Baby Dragon Hatchling)** as an alternative architecture:
-
-- **Location**: `/home/todd/olympus/AshesBelow/experiments/BDH_100M/`
-- **Architecture**: 100M params, Hebbian learning, shared parameters
-- **Hypothesis**: Hebbian gating provides natural regularization
-
-The BDH approach offers:
-- Natural regularization via sparse Hebbian gating
-- Shared parameters prevent layer-specific memorization
-- Simpler architecture without test-time optimization
-
----
-
-## Citation
-
-```bibtex
-@article{behrouz2025atlas,
-  title={Atlas: Learning to Optimally Memorize the Context at Test Time},
-  author={Behrouz, Ali and others},
-  journal={arXiv preprint arXiv:2505.23735},
-  year={2025}
-}
-```
-
-## License
-
-MIT
+*Last updated: December 17, 2024*
