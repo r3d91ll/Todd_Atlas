@@ -1,13 +1,9 @@
 # Atlas 300M Omega Training Report
 
 **Model:** Atlas 300M Omega (389.5M parameters)
-
 **Run ID:** atlas_300m_omega
-
 **Completed:** December 17, 2024
-
 **Duration:** 6.75 days (162 hours)
-
 **GPU:** 1x RTX A6000 Ampere
 
 ---
