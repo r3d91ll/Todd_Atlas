@@ -94,6 +94,24 @@ Atlas/
 
 ## Quick Start
 
+### RunPod Deployment (Recommended)
+
+Deploy the 40M test model on an RTX 5090:
+
+```
+Docker Image: ghcr.io/r3d91ll/atlas-training:5090_40M
+Volume Mount: /app/runs
+Exposed Port: 8501 (Streamlit dashboard)
+```
+
+| Tag | GPU | Purpose |
+|-----|-----|---------|
+| `5090_40M` | RTX 5090 (32GB) | Public release - 40M validation |
+| `hopper` | H100/H200 | Hopper architecture optimized |
+| `latest` | Any | Most recent build |
+
+### Local Development
+
 ```bash
 # Setup
 cd /home/todd/olympus/models/Atlas
