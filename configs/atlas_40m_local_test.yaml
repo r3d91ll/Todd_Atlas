@@ -34,7 +34,7 @@ training:
   warmup_steps: 500
   grad_clip: 1.0
 
-  batch_size: 32         # Increased for 5090/H100
+  batch_size: 24         # Balanced for 5090 (32GB VRAM)
   gradient_accumulation_steps: 2
   # Effective batch size: 32
 
