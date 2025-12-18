@@ -1,0 +1,105 @@
+# Atlas 50M Configuration - Omega Rule with The Pile Dataset
+# This is v10: Testing Omega rule on The Pile for dataset comparison
+#
+# EXPERIMENTAL DESIGN:
+# - Same Omega rule implementation as v9
+# - Different dataset (The Pile vs Dolmino) to isolate dataset variable
+# - Comparison matrix:
+#   v7: Dolmino + Original memory (baseline)
+#   v8: The Pile + Original memory
+#   v9: Dolmino + Omega rule
+#   v10: The Pile + Omega rule (this config)
+#
+# Hypothesis: Dataset quality differences will show even with Omega rule
+
+model:
+  # Architecture type - use Omega memory
+  use_omega: true
+
+  # Model dimensions (same as v9)
+  d_model: 512
+  n_layers: 8
+  n_heads: 4
+  d_ff: 2048
+  vocab_size: 32000
+  max_seq_len: 4096
+
+  # Omega Memory configuration (same as v9)
+  d_key: 512
+  d_value: 512
+  poly_degree: 2           # Quadratic polynomial features -> O(d^2) capacity
+  context_window: 16       # Omega rule optimizes over last 16 tokens
+
+  # Omega update parameters (same as v9)
+  init_alpha: 0.99         # Memory decay (high = more retention)
+  init_theta: 0.9          # Momentum coefficient
+  init_eta: 0.1            # Memory learning rate
+
+  # Attention configuration (same as v9)
+  window_size: 512
+
+  # Regularization
+  dropout: 0.1
+
+training:
+  # TNT two-stage training (same as v9)
+  use_tnt: true
+  stage1_chunk_size: 2048
+  stage1_steps: 45000
+  stage2_chunk_size: 256
+  stage2_steps: 5000
+
+  # Batch size - single GPU mode (no DDP overhead with Omega rule)
+  # Omega is compute-bound, not memory-bound, so DDP doesn't help
+  # ~500K tokens per update = 4 batch x 4096 seq x 32 accum = 524,288
+  batch_size: 4
+  seq_len: 4096
+  grad_accum_steps: 32
+  effective_batch_tokens: 524288
+
+  # Optimization (same as v9)
+  learning_rate: 4.0e-4
+  warmup_steps: 1000
+  weight_decay: 0.1
+  grad_clip: 1.0
+  betas: [0.9, 0.95]
+
+  # Logging & checkpoints
+  log_every: 10
+  val_every: 500
+  save_every: 5000
+
+  # Early stopping
+  val_patience: 20
+
+  # Memory reset - may not be needed with Omega rule's self-stabilization
+  memory_reset_every: 5000
+
+data:
+  # THE PILE DATASET - different from v9 (Dolmino) to isolate dataset variable
+  data_dir: "datasets/raw/the_pile_hf"
+  tokenizer: "tokenizer/atlas_tokenizer_pile"
+  max_seq_len: 4096
+  num_workers: 4
+  val_split: 0.10
+
+hardware:
+  distributed: false
+  devices: [1]      # GPU1 for v10 (Pile+Omega)
+  backend: "nccl"
+  mixed_precision: true
+
+output:
+  run_dir: "runs/atlas_50m_v10_omega_pile"
+
+alerts:
+  enabled: true
+  phone: "YOUR_PHONE"
+  carrier: "tmobile"
+  smtp_host: "smtp-relay.gmail.com"
+  smtp_port: 465
+  from_email: "your-email@example.com"
+  quiet_start: "22:00"
+  quiet_end: "08:00"
+  progress_updates: true
+  checkpoint_updates: true

@@ -1,0 +1,35 @@
+# Local secrets (never commit)
+configs/secrets.yaml
+.env
+
+# Training outputs
+runs/
+checkpoints/
+*.pt
+*.pth
+*.safetensors
+
+# Data files (large, downloaded separately)
+data/
+datasets
+
+# Screenshots and images
+*.png
+*.jpg
+*.jpeg
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+
+# Logs
+*.log
+
+# LaTeX build artifacts
+*.aux
+*.fdb_latexmk
+*.fls
+*.out
+*.synctex.gz
+*.toc

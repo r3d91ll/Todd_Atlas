@@ -1,0 +1,103 @@
+# Atlas 50M Configuration - Omega Rule with Polynomial Features
+# This is v9: Testing proper Atlas equations from arXiv:2505.23735v1
+#
+# EXPERIMENTAL DESIGN:
+# - Same dataset as v7 (Dolmino) to isolate the Omega rule variable
+# - Added: Polynomial features with 1/i! initialization
+# - Added: Context window optimization (Omega rule)
+# - Added: Input-dependent gamma gates
+#
+# Hypothesis: Omega rule provides self-stabilizing updates that prevent
+# the numerical instability seen in v7/v8
+
+model:
+  # Architecture type - use Omega memory
+  use_omega: true
+
+  # Model dimensions (same as v7)
+  d_model: 512
+  n_layers: 8
+  n_heads: 4
+  d_ff: 2048
+  vocab_size: 32000
+  max_seq_len: 4096
+
+  # Omega Memory configuration (NEW - from Atlas paper)
+  d_key: 512
+  d_value: 512
+  poly_degree: 2           # Quadratic polynomial features -> O(d^2) capacity
+  context_window: 16       # Omega rule optimizes over last 16 tokens
+
+  # Omega update parameters
+  init_alpha: 0.99         # Memory decay (high = more retention)
+  init_theta: 0.9          # Momentum coefficient
+  init_eta: 0.1            # Memory learning rate
+
+  # Attention configuration (same as v7)
+  window_size: 512
+
+  # Regularization
+  dropout: 0.1
+
+training:
+  # TNT two-stage training (same as v7)
+  use_tnt: true
+  stage1_chunk_size: 2048
+  stage1_steps: 45000
+  stage2_chunk_size: 256
+  stage2_steps: 5000
+
+  # Batch size - single GPU mode (no DDP overhead with Omega rule)
+  # Omega is compute-bound, not memory-bound, so DDP doesn't help
+  # ~500K tokens per update = 4 batch x 4096 seq x 32 accum = 524,288
+  batch_size: 4
+  seq_len: 4096
+  grad_accum_steps: 32
+  effective_batch_tokens: 524288
+
+  # Optimization (same as v7)
+  learning_rate: 4.0e-4
+  warmup_steps: 1000
+  weight_decay: 0.1
+  grad_clip: 1.0
+  betas: [0.9, 0.95]
+
+  # Logging & checkpoints
+  log_every: 10
+  val_every: 500
+  save_every: 5000
+
+  # Early stopping
+  val_patience: 20
+
+  # Memory reset - may not be needed with Omega rule's self-stabilization
+  memory_reset_every: 5000
+
+data:
+  # SAME AS V7 - Dolmino dataset to isolate the Omega rule variable
+  data_dir: "datasets/raw/dolma3/dolmino_mix_100B/data"
+  tokenizer: "tokenizer/atlas_tokenizer"
+  max_seq_len: 4096
+  num_workers: 4
+  val_split: 0.10
+
+hardware:
+  distributed: false
+  devices: [0]      # GPU0 for v9 (Dolmino+Omega)
+  backend: "nccl"
+  mixed_precision: true
+
+output:
+  run_dir: "runs/atlas_50m_v9_omega"
+
+alerts:
+  enabled: true
+  phone: "YOUR_PHONE"
+  carrier: "tmobile"
+  smtp_host: "smtp-relay.gmail.com"
+  smtp_port: 465
+  from_email: "your-email@example.com"
+  quiet_start: "22:00"
+  quiet_end: "08:00"
+  progress_updates: true
+  checkpoint_updates: true

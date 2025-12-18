@@ -1,0 +1,90 @@
+# Atlas Episodic Memory Training
+# Docker Compose configuration for local and cloud deployment
+#
+# Usage:
+#   Local 40M test:     docker compose up atlas-40m
+#   Cloud 389M:         docker compose up atlas-389m
+#   Build only:         docker compose build
+#
+# For Telegram alerts, create a .env file with:
+#   TELEGRAM_BOT_TOKEN=your_token
+#   TELEGRAM_CHAT_ID=your_chat_id
+
+version: '3.8'
+
+services:
+  # Local 40M test on A6000 (cuda:1)
+  atlas-40m:
+    build: .
+    image: atlas-training:latest
+    container_name: atlas-40m-local
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=1
+      - CUDA_VISIBLE_DEVICES=0
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - DATA_PATH=/data/ingredient1-common_crawl-high-quality_19_science_math_and_technology
+    volumes:
+      # Training data (read-only)
+      - /home/todd/olympus/models/datasets/raw/dolma3/dolmino_mix_100B/data:/data:ro
+      # Output directory (read-write)
+      - ./runs:/app/runs
+      # Secrets file (if using YAML instead of env vars)
+      - ./configs/secrets.yaml:/app/configs/secrets.yaml:ro
+    ports:
+      - "8501:8501"
+    command: ["./scripts/launch_40m_test.sh"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['1']
+              capabilities: [gpu]
+
+  # Cloud 389M on H100 (cuda:0)
+  atlas-389m:
+    build: .
+    image: atlas-training:latest
+    container_name: atlas-389m-cloud
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=0
+      - CUDA_VISIBLE_DEVICES=0
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - DATA_PATH=/data
+    volumes:
+      # Training data (read-only) - adjust path for cloud
+      - ${HOST_DATA_PATH:-/data}:/data:ro
+      # Output directory (read-write)
+      - ./runs:/app/runs
+    ports:
+      - "8501:8501"
+    command: ["./scripts/launch_389m_cloud.sh"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu]
+
+  # Dashboard only (for viewing completed runs)
+  dashboard:
+    build: .
+    image: atlas-training:latest
+    container_name: atlas-dashboard
+    volumes:
+      - ./runs:/app/runs:ro
+    ports:
+      - "8501:8501"
+    command: >
+      python -m streamlit run training_framework/monitoring/streamlit_monitor.py
+      --server.port 8501
+      --server.address 0.0.0.0
+      --server.headless true
+      --
+      --metrics-path runs/atlas_40m_local/metrics_stream.jsonl
+      --max-steps 5000

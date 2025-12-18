@@ -1,0 +1,80 @@
+# Atlas 300M Omega Configuration
+# ~338M parameters, single GPU (A6000 48GB)
+# Estimated training time: ~1 week
+
+model:
+  d_model: 1024
+  n_layers: 16
+  n_heads: 8
+  d_ff: 4096
+  vocab_size: 32000
+  max_seq_len: 4096
+  
+  # Memory configuration (Omega rule)
+  d_key: 1024
+  d_value: 1024
+  poly_degree: 2
+  context_window: 16
+  
+  # Memory update parameters
+  init_alpha: 0.99
+  init_theta: 0.9
+  init_eta: 0.1
+  
+  # Attention
+  window_size: 512
+  dropout: 0.1
+  use_omega: true
+
+training:
+  # Batch configuration - adjusted for larger model
+  batch_size: 2
+  seq_len: 4096
+  grad_accum_steps: 64
+  effective_batch_tokens: 524288  # 2 * 4096 * 64 = 524,288
+  
+  # Learning rate - slightly lower for larger model
+  learning_rate: 0.00015
+  weight_decay: 0.1
+  betas: [0.9, 0.95]
+  grad_clip: 1.0
+  warmup_steps: 1000
+  
+  # TNT two-stage training
+  use_tnt: true
+  stage1_steps: 100000      # ~52B tokens
+  stage1_chunk_size: 2048
+  stage2_steps: 10000       # ~5B tokens  
+  stage2_chunk_size: 256
+  
+  # Checkpointing and logging
+  save_every: 5000
+  log_every: 10
+  val_every: 500
+  val_patience: 25          # More patience for larger model
+  memory_reset_every: 5000
+
+data:
+  data_dir: /app/data/dolmino
+  tokenizer: tokenizer/atlas_tokenizer
+  max_seq_len: 4096
+  num_workers: 4
+  val_split: 0.1
+
+hardware:
+  devices: [1]              # Single GPU (GPU1 - GPU0 used for display)
+  distributed: false
+  mixed_precision: true
+  backend: nccl
+
+output:
+  run_dir: runs/atlas_300m_omega
+
+alerts:
+  enabled: false
+  # Configure alerts via environment variables or secrets.yaml
+  # phone: "YOUR_PHONE"
+  # carrier: tmobile
+  # smtp_host: smtp.example.com
+  # smtp_port: 465
+  # from_email: your-email@example.com

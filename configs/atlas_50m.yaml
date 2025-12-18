@@ -1,0 +1,102 @@
+# Atlas 50M Configuration
+# Following Miras framework from Behrouz et al.
+# Hyperparameters matched to Titans/TNT papers
+
+model:
+  # Model dimensions
+  d_model: 512
+  n_layers: 8
+  n_heads: 4
+  d_ff: 2048
+  vocab_size: 32000      # LLaMA/Mistral tokenizer vocab size
+  max_seq_len: 4096
+
+  # Memory configuration (Matrix-valued, per Miras framework)
+  d_key: 512
+  d_value: 512
+  momentum_beta: 0.9
+  memory_lr_init: 0.1
+  learn_memory_lr: true
+
+  # Retention configuration (Local + Global, per "It's All Connected")
+  retention_local_init: 0.5
+  retention_global_init: 0.1
+  adaptive_retention: false
+
+  # Attention configuration
+  window_size: 512
+
+  # Regularization
+  dropout: 0.1
+
+training:
+  # TNT two-stage training
+  use_tnt: true
+
+  # Stage 1: Large chunks, hierarchical memory (TNT paper: CG=2048)
+  stage1_chunk_size: 2048
+  stage1_steps: 45000
+
+  # Stage 2: Small chunks, fine-tuning
+  stage2_chunk_size: 256
+  stage2_steps: 5000
+
+  # Batch size targeting 1M tokens (LLaMA-style large batch)
+  # 1M = batch_size × seq_len × grad_accum × n_gpus
+  # 1M = 8 × 4096 × 16 × 2 = 1,048,576 tokens
+  batch_size: 8
+  seq_len: 4096
+  grad_accum_steps: 16
+  effective_batch_tokens: 1048576  # Documentation only
+
+  # Optimization (Titans paper: 4e-4, TNT paper: 1e-3, we use conservative)
+  learning_rate: 4.0e-4
+  warmup_steps: 1000
+  weight_decay: 0.1
+  grad_clip: 1.0
+  betas: [0.9, 0.95]
+
+  # Logging & checkpoints
+  log_every: 10
+  val_every: 500         # More frequent validation for memorization detection
+  save_every: 5000
+
+  # Early stopping (disabled for initial training run)
+  val_patience: 0        # 0 = disabled, let training run full course
+
+  # Memory reset (prevent memorization)
+  memory_reset_every: 5000  # Reset memory states every N steps
+
+data:
+  # Path relative to project root
+  data_dir: "datasets/raw/dolma3/dolmino_mix_100B/data"
+  tokenizer: "tokenizer/atlas_tokenizer"  # Custom BPE tokenizer trained on Dolmino data
+  max_seq_len: 4096
+  num_workers: 4
+  val_split: 0.20        # 80/20 train/val split (separate files)
+
+hardware:
+  # DDP across both GPUs
+  distributed: true
+  devices: [0, 1]        # Use both A6000s
+  backend: "nccl"        # NVIDIA Collective Communications Library
+  mixed_precision: true  # bf16
+
+output:
+  run_dir: "runs/atlas_50m_v7"
+
+# SMS alerting (via email-to-SMS gateway)
+alerts:
+  enabled: true
+  phone: "YOUR_PHONE"
+  carrier: "tmobile"
+  # Google Workspace SMTP Relay (IP-authenticated, no password needed)
+  smtp_host: "smtp-relay.gmail.com"
+  smtp_port: 465
+  from_email: "your-email@example.com"
+  # Quiet hours (non-critical alerts suppressed)
+  quiet_start: "22:00"  # 10pm
+  quiet_end: "08:00"    # 8am
+  # Alert types
+  progress_updates: true    # Hourly progress (respects quiet hours)
+  checkpoint_updates: true  # Checkpoint saved (respects quiet hours)

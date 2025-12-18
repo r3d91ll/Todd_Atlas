@@ -1,0 +1,943 @@
+\documentclass[11pt,a4paper]{article}
+
+% Packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{geometry}
+\usepackage{fancyhdr}
+\usepackage{enumitem}
+\usepackage{array}
+\usepackage{longtable}
+
+% Page geometry
+\geometry{margin=1in}
+
+% Hyperlink setup
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue,
+    citecolor=blue
+}
+
+% Code listing style
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    backgroundcolor=\color{gray!10},
+    keywordstyle=\color{blue},
+    commentstyle=\color{green!50!black},
+    stringstyle=\color{red!70!black},
+    showstringspaces=false
+}
+
+% Python listing style
+\lstdefinestyle{python}{
+    language=Python,
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    backgroundcolor=\color{gray!10},
+    keywordstyle=\color{blue},
+    commentstyle=\color{green!50!black},
+    stringstyle=\color{red!70!black},
+    showstringspaces=false
+}
+
+% Custom commands
+\newcommand{\Cpair}{C_{\text{pair}}}
+\newcommand{\Cout}{C_{\text{out}}}
+\newcommand{\Cin}{C_{\text{in}}}
+\newcommand{\Cext}{C_{\text{ext}}}
+\newcommand{\Deff}{D_{\text{eff}}}
+\newcommand{\Dtarget}{D_{\text{target}}}
+\newcommand{\fdim}{f_{\text{dim}}}
+\newcommand{\Hmean}{\text{Hmean}}
+\newcommand{\Pij}{P_{ij}}
+
+\title{\textbf{The Conveyance Hypothesis}\\[0.5em]
+\Large A Mathematical Framework for Measuring Information Transfer Effectiveness}
+\author{Todd Bucy}
+\date{Version 4.0 --- December 2025\\[0.5em]
+\textit{Status: Hypothesis under active investigation}}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+In 1948, Claude Shannon deliberately excluded meaning from his mathematical theory of communication, noting that ``the semantic aspects of communication are irrelevant to the engineering problem.'' This exclusion was pragmatic---the technology to measure semantic content did not exist. Seven decades later, with the emergence of Large Language Models and high-dimensional embedding spaces, we may now possess the tools to address what Shannon set aside.
+
+This paper proposes the Conveyance Hypothesis: that information transfer effectiveness between computational agents can be mathematically measured through the interaction of semantic investment, relational structure, processing capability, and shared context. We present a core equation, define measurable variables, report preliminary empirical observations, and specify conditions that would falsify the hypothesis.
+
+We argue that the distinctions between ``data,'' ``information,'' and ``knowledge'' are not merely philosophical but operationally measurable. We define data as static and boundary-preserving and existing in 3D spacetime, information as dynamic and transformation-inducing, and knowledge as the meaning that exists in high-dimensional space. This framing draws on Actor-Network Theory's concept of translation and boundary objects. We extend these qualitative analytical tools into quantifiable territory through geometric analysis of neural embedding spaces.
+
+\textbf{Key claim:} We may be entering an ``Age of Measurable Meaning''---not because we can define meaning philosophically, but because we can detect its effects mathematically.
+
+\textbf{Primary Equation:}
+\[
+\Cpair(i \leftrightarrow j) = \Hmean(\Cout, \Cin) \times \fdim(\Deff) \times \Pij
+\]
+
+\textbf{Key Prediction:} Low-dimensional representations (128--256D) outperform high-dimensional ones for information transfer, and dimensional collapse (measured by $\beta$) negatively correlates with task performance.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+%==============================================================================
+\section{Introduction: Shannon's Deliberate Exclusion}
+%==============================================================================
+
+Claude Shannon's foundational paper ``A Mathematical Theory of Communication'' (1948) begins with a remarkable constraint:
+
+\begin{quote}
+``The fundamental problem of communication is that of reproducing at one point either exactly or approximately a message selected at another point. Frequently the messages have meaning\ldots\ These semantic aspects of communication are irrelevant to the engineering problem.'' \cite{shannon1948}
+\end{quote}
+
+This exclusion was pragmatic---Shannon understood that meaning mattered, but the technology of 1948 made the problem of measurable semantic change intractable. His theory optimized for signal fidelity: how accurately can bits travel from sender to receiver? The interpretation of those bits remained outside the mathematical framework.
+
+Warren Weaver made this exclusion explicit:
+
+\begin{quote}
+``The word information, in this theory, is used in a special sense that must not be confused with its ordinary usage. In particular, information must not be confused with meaning. In fact, two messages, one of which is heavily loaded with meaning and the other of which is pure nonsense, can be exactly equivalent, from the present viewpoint, as regards information.'' \cite{weaver1949}
+\end{quote}
+
+A crucial clarification: What Weaver called ``information'' is what we now distinguish as \textbf{data}---static, transmittable representations existing in three-dimensional spacetime. \textbf{Information}, in the Conveyance Hypothesis framework, is the process by which data expands into high-dimensional knowledge space or compresses from knowledge into transmittable form. Information is not a thing but a transformation---the dynamic bridge between low-dimensional data and high-dimensional meaning. Failures in semantic transfer are due to this compression and decompression of high-dimensional meaning into 3-dimensional data that can be transmitted between bounded neural networks.
+
+Shannon's theory optimized for moving data through channels. The Conveyance Hypothesis addresses what happens when that data is the result of semantic transformation in high-dimensional spaces or induces transformation in high-dimensional spaces---the meaning transfer that Shannon deliberately set aside.
+
+\subsection{Why This Matters}
+
+The ``Internet of Things'' is rapidly transforming into the ``Internet of Agents.'' Autonomous systems---from robotic platforms to financial trading algorithms to multi-agent orchestration frameworks---are proliferating across every domain. These agents must communicate not only with humans but increasingly with each other.
+
+When Agent $A$ transmits a message to Agent $B$, how do we verify that semantic content was preserved? How do we diagnose failures when autonomous systems miscommunicate?
+
+These questions require examining both sides of the transfer:
+\begin{itemize}
+    \item \textbf{Sender side:} Does the output faithfully represent the agent's internal state?
+    \item \textbf{Receiver side:} Does the incoming message successfully integrate into the receiver's knowledge structure?
+\end{itemize}
+
+We term these outputs \textbf{boundary objects}---the low-dimensional representations that agents create to externalize their high-dimensional internal states. Boundary objects are the only artifacts that can traverse the gap between agents; the high-dimensional knowledge within a bounded neural network cannot be directly transmitted through low-dimensional 3D spacetime.
+
+This raises a fundamental question at the heart of the Conveyance Hypothesis: \textit{How do we verify that the boundary objects created by an agent are faithful representations of its internal semantic state?}
+
+Without a theoretical framework for measuring this fidelity---and for measuring how successfully boundary objects induce appropriate semantic transformation in receiving agents---we lack the tools to interpret what happens as information moves between bounded networks.
+
+The stakes are significant. Multi-agent systems coordinating physical actions, managing critical infrastructure, or making consequential decisions require reliable semantic transfer. As agent-to-agent communication becomes foundational to technological infrastructure, the absence of measurement frameworks becomes an increasingly urgent gap.
+
+Understanding how information transforms as it moves between disparate bounded networks---each with its own internal geometry and representational structure---requires theoretical grounding. The Conveyance Hypothesis aims to provide that foundation.
+
+\subsection{Why This Is Feasible Now}
+
+Three technological developments suggest the question may now be tractable:
+
+\begin{enumerate}
+    \item \textbf{High-dimensional embedding spaces:} Modern language models encode semantic relationships in geometric structures. Words, sentences, and documents occupy positions in high-dimensional space where distance correlates with semantic similarity. This gives us a measurable substrate for semantic content.
+
+    \item \textbf{Observable internal representations:} Unlike human minds, artificial neural networks offer visibility into their internal states---hidden layer activations, attention patterns, and geometric properties can be examined as information processes through the system. This visibility is imperfect; billions of parameters, polysemantic neurons, and distributed representations present significant interpretive challenges. The black box is not transparent, but it is instrumentable in ways impossible with biological cognition.
+
+    \item \textbf{Controlled experimental conditions:} AI-to-AI communication provides a laboratory setting where both sender and receiver internal states are observable, enabling bilateral measurement impossible with human subjects. We can track information from origin to destination.
+\end{enumerate}
+
+These capabilities enable a research program that Shannon's era could not pursue: the mathematical characterization of semantic transfer effectiveness.
+
+%==============================================================================
+\section{Theoretical Foundation}
+%==============================================================================
+
+\subsection{Shannon's Deliberate Exclusion (Expanded)}
+
+In 1948, Claude Shannon explicitly excluded meaning from his theory:
+
+\begin{quote}
+``The semantic aspects of communication are irrelevant to the engineering problem.''
+\end{quote}
+
+This wasn't naïve---Shannon understood meaning mattered, but 1948 technology couldn't measure it. His theory optimized for \textbf{signal fidelity}: how accurately can bits travel from sender to receiver?
+
+\textbf{The Conveyance Hypothesis addresses what Shannon excluded}: the effectiveness of semantic transformation between agents.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Aspect} & \textbf{Shannon Theory} & \textbf{Conveyance Hypothesis} \\
+\midrule
+Concern & Signal fidelity & Semantic effectiveness \\
+Measures & Bit error rate, channel capacity & $\Deff$, bilateral $\Cpair$ \\
+Question & Did the signal arrive intact? & Did meaning transform the receiver? \\
+Agents & Sender $\to$ Channel $\to$ Receiver & Internal geometries interacting \\
+\bottomrule
+\end{tabular}
+\caption{Comparison of Shannon Theory and Conveyance Hypothesis}
+\end{table}
+
+\subsection{Actor-Network Theory: Translation, Not Transmission}
+
+Drawing from Bruno Latour's Actor-Network Theory, we recognize that information transfer is \textbf{translation}, not transmission:
+
+\begin{quote}
+``There is no society, no social realm, and no social ties, but there exists translations between mediators that may generate traceable associations.''
+\end{quote}
+
+\textbf{Key insight:} Information doesn't flow like water through pipes. Every transfer is a creative transformation where \textbf{both sender and receiver are modified} through their interaction.
+
+\subsection{Boundary Objects}
+
+Following Susan Leigh Star's work, effective transfer between agents with different internal structures requires \textbf{boundary objects}---intermediate representations that maintain coherence across contexts.
+
+In our framework, $\Cext$ (external shared context) represents boundary objects that:
+\begin{itemize}
+    \item Preserve sufficient structure for reconstruction
+    \item Compress high-dimensional internal states into transferable form
+    \item Expand appropriately in the receiver's distinct geometric space
+\end{itemize}
+
+\subsection{The Data vs. Information Distinction}
+
+\begin{description}
+    \item[Data] Static patterns, boundary-preserving, exists without observers
+    \item[Information] Dynamic transformation, boundary-crossing, requires agent interaction
+\end{description}
+
+Data becomes information only when it transforms an agent's internal state. A book on a shelf contains data; reading it creates information through the transformation of the reader's understanding.
+
+%==============================================================================
+\section{The Mathematical Framework}
+%==============================================================================
+
+\subsection{Primary Conveyance Equation (v4.0)}
+
+Bilateral conveyance effectiveness between agents $i$ and $j$:
+
+\begin{equation}
+\Cpair(i \leftrightarrow j) = \Hmean(\Cout, \Cin) \times \fdim(\Deff) \times \Pij
+\label{eq:primary}
+\end{equation}
+
+\textbf{Components:}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Symbol} & \textbf{Name} & \textbf{Meaning} \\
+\midrule
+$\Cpair$ & Bilateral Conveyance & Overall transfer effectiveness between two agents \\
+$\Hmean$ & Harmonic Mean & Captures bilateral constraint (weakest link dominates) \\
+$\Cout$ & Output Capacity & Sender's ability to encode meaning \\
+$\Cin$ & Input Capacity & Receiver's ability to integrate meaning \\
+$\fdim(\Deff)$ & Dimensional Function & Richness of semantic representation \\
+$\Pij$ & Protocol Compatibility & How well agents' interfaces match $[0,1]$ \\
+\bottomrule
+\end{tabular}
+\caption{Components of the Primary Conveyance Equation}
+\end{table}
+
+\subsection{Why Harmonic Mean?}
+
+The harmonic mean is chosen deliberately:
+
+\begin{equation}
+\Hmean(a, b) = \frac{2ab}{a + b}
+\end{equation}
+
+\textbf{Property:} The harmonic mean is dominated by the smaller value.
+
+\begin{itemize}
+    \item If $\Cout = 0.9$ and $\Cin = 0.1$, then $\Hmean = 0.18$
+    \item Excellent sender + poor receiver = poor conveyance
+\end{itemize}
+
+This matches intuition: a brilliant lecturer teaching in a language students don't understand achieves low conveyance regardless of lecture quality.
+
+\subsection{Component Equations}
+
+Individual agent conveyance capacity decomposes as:
+
+\begin{align}
+\Cout(i \to j) &= \frac{W \times R \times H}{T} \\
+\Cin(j \leftarrow i) &= \frac{W \times R \times H}{T}
+\end{align}
+
+\textbf{Variable Definitions:}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Variable} & \textbf{Name} & \textbf{Concept} & \textbf{How to Measure} \\
+\midrule
+$W$ & Semantic Investment & Computational allocation & Hidden state activation patterns \\
+$R$ & Relational Discovery & Geometric positioning quality & Graph-theoretic embedding properties \\
+$H$ & Computational Frame & Processing throughput & Attention efficiency, layer utilization \\
+$T$ & Temporal Investment & Total computational budget & Token count, processing time \\
+\bottomrule
+\end{tabular}
+\caption{Variable Definitions for Component Equations}
+\end{table}
+
+\subsection{Why Multiplicative?}
+
+The framework uses \textbf{multiplication} rather than addition because:
+
+\begin{itemize}
+    \item $W = 0$ (zero semantic content) $\to$ Nothing to transfer $\to$ Zero conveyance
+    \item $R = 0$ (zero relational structure) $\to$ No geometric organization $\to$ Zero conveyance
+    \item $H = 0$ (zero processing) $\to$ Cannot utilize signals $\to$ Zero conveyance
+    \item $\Pij = 0$ (zero protocol match) $\to$ Cannot communicate $\to$ Zero conveyance
+\end{itemize}
+
+\textbf{A single zero produces zero output.} This ``zero-propagation'' principle explains why communication failures are often catastrophic rather than gradual---one essential missing component collapses the entire transfer.
+
+\subsection{Dimensional Richness Function}
+
+The dimensional function scales conveyance by how much semantic structure is preserved:
+
+\begin{align}
+\fdim(\Deff) &= \left(\frac{\Deff}{\Dtarget}\right)^{\alpha_{\text{dim}}} \\[1em]
+\text{Where:} \quad & \Deff = \text{Effective dimensionality (measured via PCA)} \nonumber \\
+& \Dtarget = \text{Target dimensionality for the layer/system} \nonumber \\
+& \alpha_{\text{dim}} \in [0.5, 1.0] \text{ (empirically determined scaling factor)} \nonumber
+\end{align}
+
+\textbf{Interpretation:}
+\begin{itemize}
+    \item $\Deff / \Dtarget = 1.0$ $\to$ Full dimensional preservation $\to$ $\fdim = 1.0$
+    \item $\Deff / \Dtarget = 0.5$ $\to$ Half dimensions preserved $\to$ $\fdim \approx 0.5$--$0.7$
+    \item $\Deff / \Dtarget \to 0$ $\to$ Dimensional collapse $\to$ $\fdim \to 0$
+\end{itemize}
+
+%==============================================================================
+\section{Key Metrics}
+%==============================================================================
+
+\subsection{$\Deff$ (Effective Dimensionality) --- PRIMARY METRIC}
+
+\textbf{Definition:} The number of independent semantic dimensions preserved during processing, computed via PCA with 90\% variance threshold.
+
+\begin{lstlisting}[style=python]
+def compute_d_eff(embeddings, variance_threshold=0.90):
+    """
+    Count dimensions capturing 90% of variance.
+    
+    CRITICAL: L2 normalize embeddings first to prevent
+    magnitude artifacts from dominating variance.
+    """
+    # Center and compute covariance
+    centered = embeddings - embeddings.mean(axis=0)
+    cov = centered.T @ centered / (len(embeddings) - 1)
+    
+    # Eigendecomposition
+    eigenvalues = np.linalg.eigvalsh(cov)[::-1]  # Descending
+    
+    # Cumulative variance ratio
+    cumvar = np.cumsum(eigenvalues) / eigenvalues.sum()
+    
+    # Count dimensions below threshold
+    d_eff = np.searchsorted(cumvar, variance_threshold) + 1
+    
+    return d_eff
+\end{lstlisting}
+
+\textbf{Why 90\% threshold?}
+\begin{itemize}
+    \item Established compromise between signal preservation and noise reduction
+    \item Components beyond 90\% typically capture noise/artifacts, not semantics
+    \item Robust across diverse domains (neural activity, manifold learning, NLP)
+\end{itemize}
+
+\textbf{Target Values:}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Nominal Dimension} & \textbf{Healthy $\Deff$} & \textbf{Collapse Warning} \\
+\midrule
+512D & $\geq 34$ & $< 20$ \\
+256D & $\geq 20$ & $< 12$ \\
+128D & $\geq 12$ & $< 8$ \\
+64D & $\geq 8$ & $< 5$ \\
+24D & $\geq 20$ & $< 12$ \\
+\bottomrule
+\end{tabular}
+\caption{Target Values for Effective Dimensionality}
+\end{table}
+
+\subsection{$\beta$ (Beta) --- DIAGNOSTIC METRIC (NOT Optimization Target)}
+
+\textbf{Definition:} Collapse indicator measuring dimensional compression during processing.
+
+\begin{equation}
+\beta = \frac{\Deff^{\text{input}}}{\Deff^{\text{output}}}
+\end{equation}
+
+\textbf{CRITICAL:} $\beta$ is a \textbf{diagnostic warning signal}, not something to optimize. High $\beta$ indicates information loss through dimensional collapse.
+
+\textbf{Interpretation:}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{$\beta$ Value} & \textbf{Status} & \textbf{Meaning} \\
+\midrule
+$< 2.0$ & Healthy & Low collapse, good generalization expected \\
+$2.0$--$2.5$ & Warning & Moderate collapse, acceptable but monitor \\
+$2.5$--$3.0$ & Concerning & High collapse, likely overfitting \\
+$> 3.0$ & Critical & Severe collapse, investigate immediately \\
+\bottomrule
+\end{tabular}
+\caption{Interpretation of Beta Values}
+\end{table}
+
+\textbf{Empirical Finding:} $\beta$ shows strong negative correlation with task performance ($r \approx -0.92$ in preliminary experiments). Lower $\beta$ = better generalization.
+
+\subsection{Secondary Geometric Metrics}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Metric} & \textbf{Symbol} & \textbf{Target} & \textbf{Meaning} \\
+\midrule
+Mean k-NN Distance & $d_{\text{nn}}$ & $0.10$--$0.15$ & Moderate clustering \\
+Label Consistency & LC & $\geq 0.87$ & Neighbors share semantic categories \\
+Boundary Sharpness & $\sigma_{\text{boundary}}$ & $0.40$--$0.50$ & Balanced separation \\
+\bottomrule
+\end{tabular}
+\caption{Secondary Geometric Metrics}
+\end{table}
+
+\subsection{Task Performance --- VALIDATION METRICS}
+
+\textbf{Primary validation is always downstream task performance, not geometric metrics.}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Metric} & \textbf{Target} & \textbf{Use Case} \\
+\midrule
+F1 Score & $\geq 0.90$ (strong), $\geq 0.85$ (acceptable) & Classification \\
+Recall@10 & $\geq 0.85$ & Retrieval \\
+Perplexity & Lower is better & Language modeling \\
+\bottomrule
+\end{tabular}
+\caption{Task Performance Validation Metrics}
+\end{table}
+
+\textbf{Geometric metrics are diagnostic.} They help explain \textit{why} task performance is good or bad, but task performance is ground truth.
+
+%==============================================================================
+\section{Core Hypotheses (Under Investigation)}
+%==============================================================================
+
+\subsection{Low-Dimensional Hypothesis}
+
+\textbf{Prediction:} External shared context ($\Cext$) performs better at 128--256 dimensions than higher dimensions.
+
+\textbf{Rationale:}
+\begin{itemize}
+    \item Forcing low dimensions makes geometric relationships carry semantic meaning
+    \item High dimensions allow magnitude artifacts to dominate
+    \item BDH architecture independently arrived at $d=256$ as optimal bottleneck
+\end{itemize}
+
+\textbf{Falsification:} High-dimensional representations (512D+) consistently outperform low-dimensional across tasks.
+
+\subsection{$\beta$-Overfitting Hypothesis}
+
+\textbf{Prediction:} $\beta \in [1.5, 2.0]$ correlates with better generalization; higher $\beta$ indicates overfitting.
+
+\textbf{Rationale:}
+\begin{itemize}
+    \item Dimensional collapse destroys information needed for generalization
+    \item Over-compressed representations memorize rather than generalize
+\end{itemize}
+
+\textbf{Preliminary Evidence:} $r(\beta, \text{F1}) \approx -0.92$ from limited experiments
+
+\textbf{Falsification:} $\beta$ shows positive correlation with task performance across domains.
+
+\subsection{Attention-Only Hypothesis}
+
+\textbf{Prediction:} Attention mechanisms outperform rigid boundary scaffolding for dimensional preservation.
+
+\textbf{Preliminary Evidence:}
+\begin{itemize}
+    \item Attention-only: $\Deff = 34$ (preserved)
+    \item Boundary scaffolding: $\Deff = 6$ (collapsed, $-83\%$ loss)
+\end{itemize}
+
+\textbf{Falsification:} Boundary scaffolding systematically wins in controlled A/B tests.
+
+\subsection{Bilateral Asymmetry Hypothesis}
+
+\textbf{Prediction:} In adversarial or misaligned contexts, $C_{A \to B} \neq C_{B \to A}$ (asymmetric conveyance).
+
+\textbf{Implication:} Misaligned AI systems might show high $C_{\text{AI} \to \text{Human}}$ (they understand us) but low $C_{\text{Human} \to \text{AI}}$ (we don't understand them).
+
+\textbf{Falsification:} Bilateral measurements show no predictive value for alignment detection.
+
+%==============================================================================
+\section{Context Amplification}
+%==============================================================================
+
+\subsection{Original Formulation (Superseded)}
+
+Earlier versions used exponential context amplification:
+
+\begin{align}
+\Cpair &= \Hmean(\Cout, \Cin) \times \Cext^\alpha \times \Pij \\
+& \text{Where } \alpha \in [1.5, 2.0] \text{ (super-linear amplification)} \nonumber
+\end{align}
+
+This predicted that context quality has super-linear effects---doubling context quality more than doubles conveyance effectiveness.
+
+\subsection{Current Formulation (v4.0)}
+
+Framework v4.0 replaces exponential $\Cext$ with dimensional preservation function:
+
+\begin{equation}
+\Cpair = \Hmean(\Cout, \Cin) \times \fdim(\Deff) \times \Pij
+\end{equation}
+
+\textbf{Key insight:} Context amplification occurs through \textbf{dimensional preservation}, not exponential scaling. Good context maintains $\Deff$; bad context causes dimensional collapse.
+
+\subsection{Geometric Extension (For Advanced Analysis)}
+
+When considering manifold structure, the complete formulation includes curvature and geodesic effects:
+
+\begin{align}
+\Cpair^{\text{geometric}} = &\; \Hmean(\Cout, \Cin) \times \fdim(\Deff) \nonumber \\
+& \times \exp\left(-\frac{\lambda}{\tau^2}\right) && \text{[curvature penalty]} \nonumber \\
+& \times \exp\left(-\frac{\text{dist}_M^2}{2\sigma^2}\right) && \text{[geodesic distance decay]} \nonumber \\
+& \times \Pij
+\end{align}
+
+Where:
+\begin{itemize}
+    \item $\tau$ = local reach (inverse maximum curvature)
+    \item $\lambda$ = curvature sensitivity parameter
+    \item $\text{dist}_M$ = geodesic distance on semantic manifold
+\end{itemize}
+
+\textbf{Interpretation:} Information flows efficiently through low-curvature regions (within semantic categories) and less efficiently across high-curvature boundaries (between categories).
+
+%==============================================================================
+\section{Temporal Dynamics}
+%==============================================================================
+
+\subsection{Multi-Turn Context Evolution}
+
+In multi-turn interactions, context evolves over time:
+
+\begin{equation}
+\Cext(t) = f(\Cext(t-1), B_t)
+\end{equation}
+
+Where $B_t$ = boundary object at turn $t$.
+
+\textbf{Quality Trajectory:}
+\begin{equation}
+\text{quality\_trajectory}(t) = \prod_{k=1}^{t} q(B_k)
+\end{equation}
+
+Where $q(B_k) \in [0, 1]$ = quality of boundary object $k$.
+
+\textbf{Critical insight:} Quality is multiplicative across turns. A single low-quality exchange ($q \approx 0.3$) can severely degrade the entire trajectory.
+
+\subsection{Self-Reinforcing Cycles}
+
+\begin{description}
+    \item[Positive cycle:] Good context $\to$ better responses $\to$ improved context $\to$ \ldots
+    \item[Negative cycle:] Poor context $\to$ confused responses $\to$ degraded context $\to$ \ldots
+\end{description}
+
+This explains why early interactions disproportionately determine outcomes---they set the trajectory's initial slope.
+
+\subsection{Threshold-Based Management}
+
+To prevent catastrophic trajectory degradation:
+
+\begin{lstlisting}
+if gap(B_t, expected) < theta_refine:
+    # Minor gap: refine and continue
+    B_t_prime = refine(B_t, feedback)
+    
+elif gap(B_t, expected) > theta_reset:
+    # Major gap: reset to last good checkpoint
+    context = restore_checkpoint(t_checkpoint)
+\end{lstlisting}
+
+%==============================================================================
+\section{Zero-Propagation Principle}
+%==============================================================================
+
+\subsection{Definition}
+
+\textbf{Zero-propagation} occurs when any essential component of conveyance equals zero:
+
+\begin{equation}
+\text{If } W = 0 \text{ OR } R = 0 \text{ OR } H = 0 \text{ OR } \Pij = 0 \text{ OR } \Deff \to 0: \quad \Cpair = 0 \text{ (categorical failure)}
+\end{equation}
+
+\subsection{Implications}
+
+Zero-propagation is \textbf{categorical failure}, distinct from ``very poor'' conveyance:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Condition} & \textbf{Result} & \textbf{Nature} \\
+\midrule
+All components $> 0$ but low & Low $\Cpair$ & Degraded but possible \\
+Any component $= 0$ & $\Cpair = 0$ & Impossible transfer \\
+\bottomrule
+\end{tabular}
+\caption{Zero-Propagation Implications}
+\end{table}
+
+\textbf{Example:} A perfect lecture ($W=1.0$, $R=1.0$, $H=1.0$) in a language no student speaks ($\Pij=0$) achieves zero conveyance---not poor conveyance, but zero.
+
+\subsection{Dimensional Collapse as Zero-Propagation}
+
+When $\Deff$ collapses to near-zero, effective conveyance becomes impossible even with good $W$, $R$, $H$, $\Pij$ values:
+
+\begin{equation}
+\Deff < \text{threshold} \to \fdim(\Deff) \to 0 \to \Cpair \to 0
+\end{equation}
+
+This explains why memory poisoning attacks with only $\sim$10\% contamination can cause $\sim$95\% task failure---small contamination triggers dimensional collapse, which cascades to zero-propagation.
+
+%==============================================================================
+\section{Falsification Criteria}
+%==============================================================================
+
+A hypothesis must be falsifiable to be scientific. The Conveyance Hypothesis would be \textbf{falsified} by:
+
+\subsection{Strong Falsification Evidence}
+
+\begin{enumerate}
+    \item \textbf{$\beta$ shows consistent positive correlation with performance across domains}
+    \begin{itemize}
+        \item Current observation: $r \approx -0.92$ (negative)
+        \item Falsifying observation: $r > +0.5$ replicated across tasks
+    \end{itemize}
+    
+    \item \textbf{High-dimensional $\Cext$ systematically outperforms low-dimensional}
+    \begin{itemize}
+        \item Current hypothesis: 128--256D optimal
+        \item Falsifying observation: 2048D+ consistently superior
+    \end{itemize}
+    
+    \item \textbf{Boundary scaffolding beats attention-only in rigorous A/B tests}
+    \begin{itemize}
+        \item Current observation: Attention-only preserves $\Deff = 34$; scaffolding collapses to $\Deff = 6$
+        \item Falsifying observation: Scaffolding wins majority of comparisons
+    \end{itemize}
+    
+    \item \textbf{Bilateral conveyance measurements show zero predictive validity}
+    \begin{itemize}
+        \item Current hypothesis: Asymmetric $\Cpair$ predicts misalignment
+        \item Falsifying observation: No correlation between $\Cpair$ asymmetry and outcomes
+    \end{itemize}
+    
+    \item \textbf{$\Pij$ compatibility shows no relationship to transfer success}
+    \begin{itemize}
+        \item Current hypothesis: Protocol match enables transfer
+        \item Falsifying observation: Incompatible agents transfer equally well
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Weak Falsification Evidence}
+
+\begin{itemize}
+    \item Single counterexamples (might be domain-specific)
+    \item Mixed results without clear patterns
+    \item Inability to measure proposed constructs reliably
+\end{itemize}
+
+%==============================================================================
+\section{Relationship to Existing Theories}
+%==============================================================================
+
+\subsection{Shannon's Information Theory}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Shannon} & \textbf{Conveyance} \\
+\midrule
+Channel capacity & Agent capacity ($W \times R \times H$) \\
+Noise & Protocol mismatch ($1 - \Pij$) \\
+Encoding & Boundary object creation \\
+Decoding & Integration into receiver geometry \\
+Bit error rate & Dimensional collapse ($\beta$) \\
+\bottomrule
+\end{tabular}
+\caption{Mapping Shannon Concepts to Conveyance}
+\end{table}
+
+\textbf{Conveyance extends Shannon} by adding semantic effectiveness to signal fidelity.
+
+\subsection{Rogers' Innovation Diffusion Theory}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Rogers} & \textbf{Conveyance} \\
+\midrule
+Adoption curves & Conveyance effectiveness over time \\
+Opinion leaders & High-conveyance nodes in networks \\
+Compatibility & $\Pij$ protocol coefficient \\
+Complexity & Inverse of $\Deff$ preservation \\
+\bottomrule
+\end{tabular}
+\caption{Mapping Rogers' Concepts to Conveyance}
+\end{table}
+
+\textbf{Conveyance mathematizes Rogers'} qualitative descriptions of how innovations spread.
+
+\subsection{Kolmogorov Complexity}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Kolmogorov} & \textbf{Conveyance} \\
+\midrule
+Minimum description length & Optimal boundary object compression \\
+Incompressibility & Essential semantic structure \\
+Algorithmic probability & Transfer success probability \\
+\bottomrule
+\end{tabular}
+\caption{Mapping Kolmogorov Concepts to Conveyance}
+\end{table}
+
+\textbf{Conveyance operationalizes} complexity concepts for agent-to-agent transfer.
+
+%==============================================================================
+\section{Practical Applications (If Validated)}
+%==============================================================================
+
+\subsection{AI Development}
+
+\begin{itemize}
+    \item \textbf{Optimization targets:} Maximize $\Deff$ rather than arbitrary metrics
+    \item \textbf{Diagnostic tools:} Detect dimensional collapse before deployment
+    \item \textbf{Architecture guidance:} Prefer attention-only over scaffolding
+    \item \textbf{Training monitoring:} Watch geometric health during learning
+\end{itemize}
+
+\subsection{AI Safety}
+
+\begin{itemize}
+    \item \textbf{Alignment detection:} Misaligned agents may show asymmetric $\Cpair$
+    \item \textbf{Early warning:} Geometric anomalies before behavioral symptoms
+    \item \textbf{Interpretability:} Ground-truth about what information actually transferred
+\end{itemize}
+
+\subsection{Memory Systems}
+
+\begin{itemize}
+    \item \textbf{Poisoning detection:} Dimensional collapse indicates contamination
+    \item \textbf{Quality maintenance:} Monitor $\Deff$ trajectory across interactions
+    \item \textbf{Defense mechanisms:} Reset when $\Deff$ drops below threshold
+\end{itemize}
+
+\subsection{Human Communication (Speculative)}
+
+If the framework validates in AI systems, it may inform:
+\begin{itemize}
+    \item Educational theory (why some teaching works)
+    \item Organizational communication (why information gets lost in hierarchies)
+    \item Cross-cultural understanding (how meaning transforms across contexts)
+\end{itemize}
+
+%==============================================================================
+\section{Current Evidence Status}
+%==============================================================================
+
+\subsection{Validated (Tier 1 Evidence)}
+
+\begin{itemize}
+    \item[\checkmark] Dimensional richness correlates positively with utility
+    \item[\checkmark] $\beta$ anti-correlates with utility ($r = -0.92$)
+    \item[\checkmark] Attention-only architecture preserves $\Deff = 34$
+    \item[\checkmark] Boundary scaffolding collapses to $\Deff = 6$ ($-83\%$ loss)
+    \item[\checkmark] L2 normalization prevents magnitude artifacts
+\end{itemize}
+
+\subsection{Preliminary Observations (Require Validation)}
+
+\begin{itemize}
+    \item[$\triangle$] Low-dimensional (128--256D) outperforms high-dimensional
+    \item[$\triangle$] $\beta \in [1.5, 2.0]$ optimal range
+    \item[$\triangle$] BDH's $d=256$ bottleneck validates independently
+\end{itemize}
+
+\subsection{Unvalidated (Theoretical)}
+
+\begin{itemize}
+    \item[?] Bilateral asymmetry predicts misalignment
+    \item[?] Curvature-modulated conveyance
+    \item[?] Temporal amplification ($T^\beta$ term)
+    \item[?] Human communication applications
+\end{itemize}
+
+\subsection{Falsified (Revised in v3.9+)}
+
+\begin{itemize}
+    \item[$\times$] Boundary-first approach (v3.7--3.8) --- produced anti-utility
+    \item[$\times$] $\beta$ as optimization target --- now diagnostic only
+    \item[$\times$] $\phi$ (conductance) and $\kappa$ (curvature) as primary metrics --- deprecated
+\end{itemize}
+
+%==============================================================================
+\section{Conclusion}
+%==============================================================================
+
+The Conveyance Hypothesis proposes that \textbf{semantic transfer effectiveness is mathematically measurable}. We offer:
+
+\begin{enumerate}
+    \item \textbf{A core equation:} $\Cpair = \Hmean(\Cout, \Cin) \times \fdim(\Deff) \times \Pij$
+    \item \textbf{Measurable variables:} $W$, $R$, $H$, $T$, $\Deff$, $\beta$, $\Pij$
+    \item \textbf{Primary metric:} $\Deff$ (effective dimensionality via PCA)
+    \item \textbf{Diagnostic metric:} $\beta$ (dimensional collapse indicator)
+    \item \textbf{Falsification criteria:} Clear conditions that would disprove the hypothesis
+    \item \textbf{Preliminary validation:} $\beta$-utility anti-correlation, attention-only superiority
+\end{enumerate}
+
+\textbf{Status:} This is a \textbf{hypothesis under investigation}, not a validated theory. The equations are mathematically coherent but require systematic empirical validation.
+
+\textbf{Core claim:} Clean math $\neq$ empirical reality. We have elegant equations that need rigorous testing. The Low-Dimensional Hypothesis, $\beta$-overfitting correlation, and bilateral asymmetry predictions all await experimental validation.
+
+Shannon's exclusion of meaning was wise for 1948. In 2025, with transformer architectures providing measurable embedding spaces, we may finally have the tools to include what he deliberately left out.
+
+%==============================================================================
+\appendix
+\section{Quick Reference}
+%==============================================================================
+
+\subsection*{Primary Equation}
+\begin{equation}
+\Cpair(i \leftrightarrow j) = \Hmean(\Cout, \Cin) \times \fdim(\Deff) \times \Pij
+\end{equation}
+
+\subsection*{Component Equations}
+\begin{align}
+\Cout &= \frac{W \times R \times H}{T} \\
+\Cin &= \frac{W \times R \times H}{T} \\
+\fdim(\Deff) &= \left(\frac{\Deff}{\Dtarget}\right)^{\alpha_{\text{dim}}}
+\end{align}
+
+\subsection*{Variables}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Symbol} & \textbf{Name} & \textbf{Range} \\
+\midrule
+$W$ & Semantic Investment & $[0, 1]$ \\
+$R$ & Relational Discovery & $[0, 1]$ \\
+$H$ & Computational Frame & $[0, 1]$ \\
+$T$ & Temporal Investment & $[0, \infty)$ \\
+$\Deff$ & Effective Dimensionality & $[1, D_{\text{nominal}}]$ \\
+$\beta$ & Collapse Indicator & $[1, \infty)$ \\
+$\Pij$ & Protocol Compatibility & $[0, 1]$ \\
+$\alpha_{\text{dim}}$ & Dimensional Scaling & $[0.5, 1.0]$ \\
+\bottomrule
+\end{tabular}
+\caption{Variable Summary}
+\end{table}
+
+\subsection*{Target Values}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Metric} & \textbf{Target} & \textbf{Warning} \\
+\midrule
+$\Deff$ (512D) & $\geq 34$ & $< 20$ \\
+$\Deff$ (256D) & $\geq 20$ & $< 12$ \\
+$\beta$ & $< 2.0$ & $> 2.5$ \\
+$d_{\text{nn}}$ & $0.10$--$0.15$ & $< 0.05$ or $> 0.25$ \\
+LC & $\geq 0.87$ & $< 0.70$ \\
+F1 & $\geq 0.90$ & $< 0.85$ \\
+\bottomrule
+\end{tabular}
+\caption{Target Values Summary}
+\end{table}
+
+\subsection*{Critical Rules}
+
+\begin{enumerate}
+    \item \textbf{ALWAYS} L2 normalize embeddings before geometric analysis
+    \item \textbf{NEVER} optimize for $\beta$---it's diagnostic only
+    \item \textbf{PRIMARY} validation is task performance, not geometric metrics
+    \item \textbf{WATCH} for dimensional collapse ($\Deff$ dropping rapidly)
+\end{enumerate}
+
+%==============================================================================
+\section{Version History}
+%==============================================================================
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Version} & \textbf{Date} & \textbf{Key Changes} \\
+\midrule
+v1.0 & 2024 & Initial formulation with $\Cext^\alpha$ \\
+v3.7--3.8 & Oct 2025 & Boundary-first approach (later falsified) \\
+v3.9 & Oct 2025 & $\Deff$ as primary metric, $\beta$ inversion discovered \\
+v4.0 & Nov 2025 & $\fdim(\Deff)$ replaces $\Cext^\alpha$, attention-only validated \\
+\bottomrule
+\end{tabular}
+\caption{Version History}
+\end{table}
+
+\vspace{2em}
+
+\begin{quote}
+\textit{``The fundamental problem of communication is that of reproducing at one point either exactly or approximately a message selected at another point.''} --- Claude Shannon, 1948
+\end{quote}
+
+\begin{quote}
+\textit{``The fundamental problem of conveyance is that of transforming at one agent a semantic structure that appropriately reorganizes another agent's internal geometry.''} --- The Conveyance Hypothesis, 2025
+\end{quote}
+
+%==============================================================================
+\begin{thebibliography}{99}
+%==============================================================================
+
+\bibitem{shannon1948}
+Shannon, C.~E. (1948).
+\newblock A mathematical theory of communication.
+\newblock {\em The Bell System Technical Journal}, 27(3):379--423.
+
+\bibitem{weaver1949}
+Weaver, W. (1949).
+\newblock Recent contributions to the mathematical theory of communication.
+\newblock In Shannon, C.~E. and Weaver, W., editors, {\em The Mathematical Theory of Communication}, pages 1--28. University of Illinois Press.
+
+\end{thebibliography}
+
+\end{document}

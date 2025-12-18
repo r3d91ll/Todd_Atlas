@@ -1,0 +1,11 @@
+{
+  "tokenizer_class": "LlamaTokenizerFast",
+  "bos_token": "<s>",
+  "eos_token": "</s>",
+  "unk_token": "<unk>",
+  "pad_token": "<pad>",
+  "add_bos_token": true,
+  "add_eos_token": false,
+  "model_max_length": 4096,
+  "clean_up_tokenization_spaces": false
+}

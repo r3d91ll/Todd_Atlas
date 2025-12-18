@@ -1,0 +1,59 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
+# Training outputs (mounted separately)
+runs/
+checkpoints/
+*.pt
+*.pth
+*.safetensors
+
+# Logs
+*.log
+
+# Secrets (should be mounted, not baked in)
+configs/secrets.yaml
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Large files
+*.npy
+*.npz
+*.pkl
+*.h5
+*.hdf5
+
+# OS
+.DS_Store
+Thumbs.db

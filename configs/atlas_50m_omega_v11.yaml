@@ -1,0 +1,104 @@
+# Atlas 50M Configuration - v11: Continued training on curated Dolmino data
+# Continues from v9 checkpoint_50000.pt with NEW high-quality data
+#
+# EXPERIMENTAL DESIGN:
+# - Resume from v9's final checkpoint (50K steps on Dolmino v19 mix)
+# - Train on FRESH curated data: literature, education, history, science (v20)
+# - Same architecture, same hyperparameters - only data changes
+#
+# Hypothesis: Additional 50K steps on high-quality prose data will:
+# - Reduce perplexity from ~220 to ~100-150
+# - Improve coherence of generated text
+# - Prevent overfitting by using new data (v20 instead of v19)
+
+model:
+  # Architecture type - use Omega memory (same as v9)
+  use_omega: true
+
+  # Model dimensions (same as v9)
+  d_model: 512
+  n_layers: 8
+  n_heads: 4
+  d_ff: 2048
+  vocab_size: 32000
+  max_seq_len: 4096
+
+  # Omega Memory configuration (same as v9)
+  d_key: 512
+  d_value: 512
+  poly_degree: 2           # Quadratic polynomial features -> O(d^2) capacity
+  context_window: 16       # Omega rule optimizes over last 16 tokens
+
+  # Omega update parameters (same as v9)
+  init_alpha: 0.99         # Memory decay (high = more retention)
+  init_theta: 0.9          # Momentum coefficient
+  init_eta: 0.1            # Memory learning rate
+
+  # Attention configuration (same as v9)
+  window_size: 512
+
+  # Regularization
+  dropout: 0.1
+
+training:
+  # TNT two-stage training - Continue to 100K total steps
+  # v9 stopped at 50K, we continue for another 50K on new data
+  use_tnt: true
+  stage1_chunk_size: 2048
+  stage1_steps: 90000      # Extended: 45K more from checkpoint_50000
+  stage2_chunk_size: 256
+  stage2_steps: 10000      # Extended: 5K more
+
+  # Batch size (same as v9)
+  batch_size: 4
+  seq_len: 4096
+  grad_accum_steps: 32
+  effective_batch_tokens: 524288
+
+  # Optimization - slightly lower LR for continued training
+  learning_rate: 2.0e-4    # Half of v9's LR for stable continued training
+  warmup_steps: 500        # Shorter warmup since model is already trained
+  weight_decay: 0.1
+  grad_clip: 1.0
+  betas: [0.9, 0.95]
+
+  # Logging & checkpoints
+  log_every: 10
+  val_every: 500
+  save_every: 5000
+
+  # Early stopping
+  val_patience: 20
+
+  # Memory reset
+  memory_reset_every: 5000
+
+data:
+  # NEW: Use v20 literature only (highest prose quality, 1.2GB)
+  # v9 used v19 mix, v11 uses fresh v20 literature for continued training
+  data_dir: "/app/data/dolmino"
+  tokenizer: "tokenizer/atlas_tokenizer"
+  max_seq_len: 4096
+  num_workers: 4
+  val_split: 0.10
+
+hardware:
+  distributed: false
+  devices: [1]      # GPU1 for v11 (continuing v9 on new data)
+  backend: "nccl"
+  mixed_precision: true
+
+output:
+  run_dir: "runs/atlas_50m_v11_omega_curated"
+
+alerts:
+  enabled: true
+  phone: "YOUR_PHONE"
+  carrier: "tmobile"
+  smtp_host: "smtp-relay.gmail.com"
+  smtp_port: 465
+  from_email: "your-email@example.com"
+  quiet_start: "22:00"
+  quiet_end: "08:00"
+  progress_updates: true
+  checkpoint_updates: true

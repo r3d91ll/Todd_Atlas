@@ -1,0 +1,107 @@
+# Atlas 40M Local Test Configuration
+# Purpose: Test full pipeline (dashboard, alerts, episodic training) on A6000
+# Expected runtime: ~2-4 hours for 5000 steps
+#
+# This is intentionally small to validate:
+# - Streamlit dashboard works with live data
+# - Telegram alerts fire correctly
+# - Episodic storage/retrieval cycles work
+# - Phase-based gate floor transitions
+# - All metrics collection
+
+model:
+  d_model: 384
+  n_layers: 8
+  n_heads: 6
+  d_ff: 1536
+  vocab_size: 32000
+  max_seq_len: 1024  # Shorter for faster iteration
+
+  # Omega memory config
+  d_key: 384
+  d_value: 384
+  poly_degree: 2
+  context_window: 16
+  init_alpha: 0.99
+  init_theta: 0.9
+  init_eta: 0.1
+  window_size: 256
+
+training:
+  max_steps: 5000        # ~2-4 hours on A6000
+  learning_rate: 3e-4
+  weight_decay: 0.1
+  warmup_steps: 500
+  grad_clip: 1.0
+
+  batch_size: 32         # Increased for 5090/H100
+  gradient_accumulation_steps: 2
+  # Effective batch size: 32
+
+  log_interval: 25
+  checkpoint_interval: 1000
+  metrics_path: "runs/atlas_40m_local/metrics_stream.jsonl"
+  checkpoint_dir: "runs/atlas_40m_local/checkpoints"
+
+  device: "cuda:1"       # Your A6000
+  dtype: "bfloat16"
+  compile_model: false   # Skip for faster startup
+
+episodic:
+  enabled: true
+  storage_samples: 5     # Smaller for faster episodes
+  retrieval_samples: 5
+
+  # Phase transitions (accelerated for test)
+  phase1_steps: 1500     # High floor: steps 0-1500
+  phase2_steps: 2000     # Medium floor: steps 1500-3500
+  phase1_gate_floor: 0.30
+  phase2_gate_floor: 0.10
+  phase3_gate_floor: 0.05
+
+  storage_gate_target: 0.80
+  retrieval_gate_floor: 0.30
+
+  retrieval_loss_weight: 5.0
+  storage_loss_weight: 1.0
+
+  reset_memory_between_episodes: false
+
+monitoring:
+  dashboard_enabled: true
+  dashboard_port: 8501
+
+  # Alert thresholds - same as production
+  alerts:
+    gate_collapse_risk:
+      threshold: 0.80
+      severity: "critical"
+    gate_dead_ratio:
+      threshold: 0.30
+      severity: "warning"
+    retrieval_token_accuracy:
+      threshold: 0.50
+      severity: "warning"
+      direction: "below"
+    memory_sparsity:
+      threshold: 0.50
+      severity: "warning"
+
+  # Telegram - set env vars to test
+  telegram:
+    enabled: true
+    bot_token: "${TELEGRAM_BOT_TOKEN}"
+    chat_id: "${TELEGRAM_CHAT_ID}"
+    cooldown_minutes: 5
+
+data:
+  # Use real data for realistic testing
+  dataset_path: "/app/data/dolmino"
+
+  num_workers: 4
+  max_seq_len: 1024
+
+# Test-specific settings
+test_alerts:
+  # Force an alert at step 100 to verify Telegram works
+  send_test_alert_at_step: 100
