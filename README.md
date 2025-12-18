@@ -12,7 +12,7 @@ A minimal, observable implementation of the Behrouz et al. memory architecture f
 ### 300M Results Summary
 
 - **Final PPL:** 229
-- **Training Time:** 38.9 hours
+- **Training Time:** 6.75 days on single RTX A6000
 - **Key Finding:** Gate collapse phenomenon - model learned to bypass memory (99.3% attention, 0.7% memory)
 - **Conclusion:** Architecture validated, but 389M insufficient for coherent generation. Scaling to 1B.
 

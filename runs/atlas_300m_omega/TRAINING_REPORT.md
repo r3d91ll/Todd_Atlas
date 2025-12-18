@@ -3,7 +3,7 @@
 **Model:** Atlas 300M Omega (389.5M parameters)
 **Run ID:** atlas_300m_omega
 **Completed:** December 17, 2024
-**Duration:** 38.94 hours
+**Duration:** 6.75 days (162 hours)
 
 ---
 
@@ -59,14 +59,14 @@ The Atlas 300M Omega model completed full training (110,000 steps) implementing 
 
 | Milestone | Step | Time | PPL |
 |-----------|------|------|-----|
-| Start | 0 | 0h | ~30,000 |
-| 10K | 10,000 | 3.5h | ~1,200 |
-| 25K | 25,000 | 8.7h | ~500 |
-| 50K | 50,000 | 17.4h | ~350 |
-| 70K | 70,000 | 24.4h | ~300 |
-| 90K | 90,000 | 31.4h | ~250 |
-| Stage 2 Start | 100,000 | 34.9h | ~230 |
-| **Complete** | **110,000** | **38.9h** | **~229** |
+| Start | 0 | Day 0 | ~30,000 |
+| 10K | 10,000 | Day 0.6 | ~1,200 |
+| 25K | 25,000 | Day 1.5 | ~500 |
+| 50K | 50,000 | Day 3.1 | ~350 |
+| 70K | 70,000 | Day 4.3 | ~300 |
+| 90K | 90,000 | Day 5.5 | ~250 |
+| Stage 2 Start | 100,000 | Day 6.1 | ~230 |
+| **Complete** | **110,000** | **Day 6.75** | **~229** |
 
 ### Final Metrics
 
@@ -380,11 +380,11 @@ CUDA_VISIBLE_DEVICES=1 python scripts/train_ddp_omega.py \
 
 | Resource | Usage | Cost |
 |----------|-------|------|
-| GPU Time | 38.94 hours | $0 (local) |
-| Electricity | ~12 kWh | ~$2 |
-| **Total** | | **~$2** |
+| GPU Time | 6.75 days (162 hours) | $0 (local) |
+| Electricity | ~49 kWh | ~$6 |
+| **Total** | | **~$6** |
 
-Equivalent cloud cost (H100 @ $2.39/hr): ~$93
+Equivalent cloud cost (H100 @ $2.39/hr): ~$387
 
 ## Appendix D: Comparison to 62M Baseline
 
@@ -392,7 +392,7 @@ Equivalent cloud cost (H100 @ $2.39/hr): ~$93
 |--------|-----------|------------|
 | Parameters | 62.6M | 389.5M |
 | Final PPL | ~270 | ~229 |
-| Training Time | ~14 hours | ~39 hours |
+| Training Time | ~14 hours | 6.75 days |
 | Steps | 81,501 (early stop) | 110,000 (full) |
 | Coherent Output | No | No |
 | Memory Used | Yes (gates ~5%) | No (gates <1%) |
