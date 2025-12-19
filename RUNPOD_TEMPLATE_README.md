@@ -41,7 +41,18 @@ Mount a persistent volume to `/app/runs` to preserve:
 
 ## Environment Variables (Optional)
 
-For Telegram alerts, set:
+### Hugging Face Upload (Recommended)
+Automatically upload trained model to your private HF repo after training:
+```
+HF_TOKEN=hf_xxxxxxxxxxxx      # Required - your HF access token (write permission)
+HF_USERNAME=your_username      # Required - your HF username
+HF_REPO=atlas-40m-episodic     # Optional - repo name (default: atlas-40m-episodic)
+```
+
+After training, find your model at: `https://huggingface.co/YOUR_USERNAME/atlas-40m-episodic`
+
+### Telegram Alerts
+Get notified of training events:
 ```
 TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
