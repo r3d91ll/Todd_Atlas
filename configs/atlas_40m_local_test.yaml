@@ -34,9 +34,9 @@ training:
   warmup_steps: 500
   grad_clip: 1.0
 
-  batch_size: 20         # Reduced for 5090 (32GB) - retrieval reuse needs headroom
+  batch_size: 48         # 6000 Pro Blackwell (96GB VRAM)
   gradient_accumulation_steps: 4  # Larger effective batch = better GPU utilization
-  # Effective batch size: 80 (20 * 4)
+  # Effective batch size: 192 (48 * 4)
 
   log_interval: 25
   checkpoint_interval: 1000
