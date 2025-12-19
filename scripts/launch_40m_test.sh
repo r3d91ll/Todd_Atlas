@@ -113,5 +113,56 @@ export CUDA_DEVICE="$DEVICE"
 python scripts/train_episodic.py \
     --config configs/atlas_40m_local_test.yaml
 
+TRAINING_EXIT_CODE=$?
+
 echo ""
-echo "Training complete!"
+echo "=============================================="
+echo "TRAINING COMPLETE"
+echo "=============================================="
+echo "Exit code: $TRAINING_EXIT_CODE"
+echo ""
+
+# If running on RunPod, stop the pod to save money
+if [ -n "$RUNPOD_POD_ID" ]; then
+    echo "RunPod detected. Stopping pod in 60 seconds..."
+    echo "Check your results at: /app/runs/atlas_40m_local/"
+    echo "Checkpoint: /app/runs/atlas_40m_local/checkpoints/"
+    echo "Metrics: /app/runs/atlas_40m_local/metrics_stream.jsonl"
+    echo ""
+    echo "To prevent shutdown, run: touch /tmp/keep_alive"
+    echo ""
+
+    # Give user 60 seconds to intervene
+    for i in {60..1}; do
+        if [ -f "/tmp/keep_alive" ]; then
+            echo "Keep-alive file detected. Pod will NOT be stopped."
+            echo "Remove /tmp/keep_alive and the pod will stop on next training completion."
+            exit 0
+        fi
+        echo -ne "Stopping in $i seconds...\r"
+        sleep 1
+    done
+
+    echo ""
+    echo "Stopping RunPod pod: $RUNPOD_POD_ID"
+
+    # Try runpodctl first (available in RunPod containers)
+    if command -v runpodctl &> /dev/null; then
+        runpodctl stop pod $RUNPOD_POD_ID || true
+    fi
+
+    # Also try the API directly as fallback
+    if [ -n "$RUNPOD_API_KEY" ]; then
+        curl -s -X POST "https://api.runpod.io/graphql" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $RUNPOD_API_KEY" \
+            -d "{\"query\": \"mutation { podStop(input: {podId: \\\"$RUNPOD_POD_ID\\\"}) { id } }\"}" \
+            || true
+    fi
+
+    echo "Stop command sent. Pod should power down shortly."
+else
+    echo "Not running on RunPod. Container will exit normally."
+fi
+
+exit $TRAINING_EXIT_CODE
