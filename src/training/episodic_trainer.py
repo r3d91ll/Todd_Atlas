@@ -442,10 +442,14 @@ class EpisodicDDPTrainer:
             'retrieval_accuracies': [],
         }
 
+        # Collect batches for this episode - we'll reuse them for retrieval
+        episode_batches = []
+
         # Storage phase
         self._set_episode_mode(EpisodePhase.STORAGE)
         for _ in range(self.ep_config.storage_samples):
             batch = self._get_batch()
+            episode_batches.append(batch)  # Save for retrieval phase
             metrics = self._storage_step(batch)
             episode_metrics['storage_losses'].append(metrics['loss'])
 
@@ -458,10 +462,11 @@ class EpisodicDDPTrainer:
                 self._update_training_phase()
                 self._set_lr(self._get_lr())
 
-        # Retrieval phase
+        # Retrieval phase - reuse the SAME batches from storage
         self._set_episode_mode(EpisodePhase.RETRIEVAL)
-        for _ in range(self.ep_config.retrieval_samples):
-            batch = self._get_batch()
+        for i in range(self.ep_config.retrieval_samples):
+            # Reuse stored batches (cycle if retrieval_samples > storage_samples)
+            batch = episode_batches[i % len(episode_batches)]
             metrics = self._retrieval_step(batch)
             episode_metrics['retrieval_losses'].append(metrics['loss'])
 
