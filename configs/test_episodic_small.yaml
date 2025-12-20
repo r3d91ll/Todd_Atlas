@@ -1,0 +1,108 @@
+# Test Configuration for Episodic Memory Training Validation
+# Purpose: Validate the full training pipeline in <2 hours on local GPU
+#
+# This creates a small model (~6M params) to test:
+# - Episodic storage/retrieval cycles
+# - Gate mode switching (STORAGE/RETRIEVAL)
+# - Retrieval verification with loss penalty
+# - Streamlit dashboard integration
+# - Telegram alerting (if configured)
+# - All 15+ memory metrics collection
+
+model:
+  d_model: 256
+  n_layers: 6
+  n_heads: 4
+  d_ff: 1024
+  vocab_size: 1000  # Small vocab for fast testing
+  max_seq_len: 512
+
+  # Omega memory config
+  d_key: 256
+  d_value: 256
+  poly_degree: 2
+  context_window: 8
+  init_alpha: 0.99
+  init_theta: 0.9
+  init_eta: 0.1
+  window_size: 256
+
+training:
+  max_steps: 1000        # ~1-2 hours on local GPU
+  learning_rate: 3e-4
+  weight_decay: 0.1
+  warmup_steps: 100
+  grad_clip: 1.0
+
+  batch_size: 8
+  gradient_accumulation_steps: 2
+
+  # Logging and checkpointing
+  log_interval: 10
+  checkpoint_interval: 250
+  metrics_path: "runs/test_episodic/metrics_stream.jsonl"
+  checkpoint_dir: "runs/test_episodic/checkpoints"
+
+  # Device
+  device: "cuda"
+  dtype: "bfloat16"
+  compile_model: false
+
+episodic:
+  enabled: true
+  storage_samples: 5     # Smaller for faster testing
+  retrieval_samples: 5
+
+  # Phase-based gate floor scheduling (accelerated for test)
+  phase1_steps: 300      # High floor phase
+  phase2_steps: 400      # Medium floor phase (cumulative: 700)
+  phase1_gate_floor: 0.30
+  phase2_gate_floor: 0.10
+  phase3_gate_floor: 0.05
+
+  # Gate targets
+  storage_gate_target: 0.80
+  retrieval_gate_floor: 0.30
+
+  # Loss weights
+  retrieval_loss_weight: 5.0
+  storage_loss_weight: 1.0
+
+  reset_memory_between_episodes: false
+
+monitoring:
+  dashboard_enabled: true
+  dashboard_port: 8501
+
+  # Alert thresholds
+  alerts:
+    gate_collapse_risk: 0.80
+    retrieval_accuracy_floor: 0.50
+    memory_dead_ratio: 0.30
+
+  # Telegram (optional - set env vars or leave empty)
+  telegram:
+    enabled: false   # Set to true and configure for cloud runs
+    bot_token: ""    # ${TELEGRAM_BOT_TOKEN}
+    chat_id: ""      # ${TELEGRAM_CHAT_ID}
+
+data:
+  # For testing: use synthetic data
+  use_synthetic: true
+  synthetic_vocab_size: 1000
+  synthetic_seq_len: 256
+
+  # Or use real data subset
+  # dataset_path: "../datasets/raw/dolma3/dolmino_mix_100B/data/"
+  # categories:
+  #   - "ingredient1-common_crawl-high-quality_19_science_math_and_technology"
+  # max_samples: 10000  # Small subset for testing
+
+# Success criteria for test validation
+validation_criteria:
+  dashboard_loads: true
+  metrics_logged: true
+  retrieval_verification_works: true
+  gate_metrics_collected: true
+  no_nan_inf: true
+  max_time_hours: 2.0
