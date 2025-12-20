@@ -1,20 +1,18 @@
 #!/bin/bash
-# Launch Atlas training with dashboard
-# Designed for both local and Docker deployment
+# Launch Atlas Dashboard (training started manually)
 #
 # Usage:
 #   ./scripts/launch_40m_test.sh
 #
-# For Docker: This script is the ENTRYPOINT - starts everything automatically
+# To start training, run in another terminal:
+#   python scripts/train_episodic.py --config configs/atlas_40m_local_test.yaml
 
 set -e
 
 # Use absolute paths - handle both local and Docker environments
 if [ -d "/app/scripts" ]; then
-    # Docker environment
     PROJECT_DIR="/app"
 else
-    # Local environment
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 fi
@@ -22,7 +20,6 @@ cd "$PROJECT_DIR"
 echo "Working directory: $(pwd)"
 
 # Activate virtual environment if it exists (local dev)
-# In Docker, we don't need venv - packages are installed globally
 if [ -f "venv/bin/activate" ]; then
     source venv/bin/activate
 fi
@@ -31,39 +28,50 @@ fi
 pip install streamlit plotly --quiet 2>/dev/null || true
 
 # Create output directories
-mkdir -p runs/atlas_40m_local
+mkdir -p runs/atlas_40m_local/checkpoints
 mkdir -p data
 
-# Training data is baked into the image at data/dolmino/
+# Training data check
 DATA_DIR="$PROJECT_DIR/data/dolmino"
 if [ ! -d "$DATA_DIR" ] || [ -z "$(ls -A $DATA_DIR 2>/dev/null)" ]; then
-    echo "ERROR: Training data not found at $DATA_DIR"
-    echo "This should not happen - data is baked into the Docker image."
-    exit 1
+    echo "WARNING: Training data not found at $DATA_DIR"
+    echo "Training will fail until data is available."
 fi
 
 # Set data path for training
 export DATA_PATH="$DATA_DIR"
 
-# Determine GPU device (Docker uses cuda:0 via NVIDIA_VISIBLE_DEVICES mapping)
-DEVICE=${CUDA_DEVICE:-cuda:1}
+# Determine GPU device
+DEVICE=${CUDA_DEVICE:-cuda:0}
 if [ -n "$NVIDIA_VISIBLE_DEVICES" ]; then
-    DEVICE="cuda:0"  # Docker remaps GPU
+    DEVICE="cuda:0"
 fi
+export CUDA_DEVICE="$DEVICE"
 
 echo "=============================================="
 echo "Atlas Episodic Memory Training"
 echo "=============================================="
-echo "Project: $PROJECT_DIR"
-echo "Device:  $DEVICE"
+echo "Project:   $PROJECT_DIR"
+echo "Device:    $DEVICE"
 echo "Dashboard: http://localhost:8501"
-if [ -n "$DATA_PATH" ]; then
-    echo "Data:    $DATA_PATH (from env)"
-fi
+echo ""
+echo "=============================================="
+echo "MANUAL TRAINING MODE"
+echo "=============================================="
+echo ""
+echo "Dashboard will start automatically."
+echo "To start training, open a terminal and run:"
+echo ""
+echo "  cd /app && python scripts/train_episodic.py --config configs/atlas_40m_local_test.yaml"
+echo ""
+echo "Or use the helper script:"
+echo ""
+echo "  /app/scripts/start_training.sh"
+echo ""
+echo "=============================================="
 echo ""
 
-# Start Streamlit dashboard in background (headless for Docker)
-# Proxy-friendly settings for RunPod and other cloud providers
+# Start Streamlit dashboard (foreground - keeps container alive)
 echo "Starting dashboard..."
 python -m streamlit run training_framework/monitoring/streamlit_monitor.py \
     --server.port 8501 \
@@ -75,176 +83,9 @@ python -m streamlit run training_framework/monitoring/streamlit_monitor.py \
     --browser.gatherUsageStats false \
     -- \
     --metrics-path runs/atlas_40m_local/metrics_stream.jsonl \
-    --max-steps 5000 \
-    > runs/atlas_40m_local/dashboard.log 2>&1 &
+    --max-steps 5000
 
-DASHBOARD_PID=$!
-echo "Dashboard PID: $DASHBOARD_PID"
-
-# Wait for dashboard to start
-sleep 3
-
-# Verify dashboard is running
-if kill -0 $DASHBOARD_PID 2>/dev/null; then
-    echo "Dashboard started successfully"
-else
-    echo "WARNING: Dashboard may have failed to start"
-    cat runs/atlas_40m_local/dashboard.log 2>/dev/null | tail -10
-fi
-
-echo ""
-echo "Starting training..."
-echo "=============================================="
-echo ""
-
-# Trap to cleanup on exit
-cleanup() {
-    echo ""
-    echo "Stopping dashboard (PID: $DASHBOARD_PID)..."
-    kill $DASHBOARD_PID 2>/dev/null || true
-    wait $DASHBOARD_PID 2>/dev/null || true
-    echo "Cleanup complete"
-}
-trap cleanup EXIT INT TERM
-
-# Start training (foreground - blocks until complete)
-# Pass device override for Docker compatibility
-export CUDA_DEVICE="$DEVICE"
-python scripts/train_episodic.py \
-    --config configs/atlas_40m_local_test.yaml
-
-TRAINING_EXIT_CODE=$?
-
-echo ""
-echo "=============================================="
-echo "TRAINING COMPLETE"
-echo "=============================================="
-echo "Exit code: $TRAINING_EXIT_CODE"
-echo ""
-
-# Upload to Hugging Face if configured
-if [ -n "$HF_TOKEN" ]; then
-    echo "=============================================="
-    echo "UPLOADING TO HUGGING FACE"
-    echo "=============================================="
-
-    # Default repo name if not set
-    HF_REPO=${HF_REPO:-"atlas-40m-episodic"}
-    HF_USERNAME=${HF_USERNAME:-""}
-
-    if [ -z "$HF_USERNAME" ]; then
-        echo "WARNING: HF_USERNAME not set. Attempting to get from token..."
-        HF_USERNAME=$(python -c "from huggingface_hub import whoami; print(whoami()['name'])" 2>/dev/null || echo "")
-    fi
-
-    if [ -n "$HF_USERNAME" ]; then
-        FULL_REPO="$HF_USERNAME/$HF_REPO"
-        echo "Uploading to: $FULL_REPO"
-        echo ""
-
-        # Upload checkpoint and metrics
-        python -c "
-from huggingface_hub import HfApi, create_repo
-import os
-
-api = HfApi()
-repo_id = '$FULL_REPO'
-
-# Create repo if it doesn't exist (private by default)
-try:
-    create_repo(repo_id, private=True, exist_ok=True)
-    print(f'Repository ready: {repo_id}')
-except Exception as e:
-    print(f'Repo creation note: {e}')
-
-# Upload checkpoint
-checkpoint_dir = 'runs/atlas_40m_local/checkpoints'
-if os.path.exists(checkpoint_dir):
-    print('Uploading checkpoints...')
-    api.upload_folder(
-        folder_path=checkpoint_dir,
-        repo_id=repo_id,
-        path_in_repo='checkpoints',
-    )
-    print('Checkpoints uploaded!')
-
-# Upload metrics
-metrics_file = 'runs/atlas_40m_local/metrics_stream.jsonl'
-if os.path.exists(metrics_file):
-    print('Uploading metrics...')
-    api.upload_file(
-        path_or_fileobj=metrics_file,
-        path_in_repo='metrics_stream.jsonl',
-        repo_id=repo_id,
-    )
-    print('Metrics uploaded!')
-
-# Upload config
-config_file = 'configs/atlas_40m_local_test.yaml'
-if os.path.exists(config_file):
-    api.upload_file(
-        path_or_fileobj=config_file,
-        path_in_repo='config.yaml',
-        repo_id=repo_id,
-    )
-    print('Config uploaded!')
-
-print(f'')
-print(f'Upload complete! View at: https://huggingface.co/{repo_id}')
-" 2>&1 || echo "WARNING: HuggingFace upload failed"
-
-    else
-        echo "ERROR: Could not determine HF_USERNAME. Skipping upload."
-        echo "Set HF_USERNAME environment variable to enable upload."
-    fi
-else
-    echo "HF_TOKEN not set. Skipping HuggingFace upload."
-    echo "To enable: set HF_TOKEN, HF_USERNAME, and optionally HF_REPO env vars."
-fi
-
-echo ""
-
-# If running on RunPod, stop the pod to save money
-if [ -n "$RUNPOD_POD_ID" ]; then
-    echo "RunPod detected. Stopping pod in 60 seconds..."
-    echo "Check your results at: /app/runs/atlas_40m_local/"
-    echo "Checkpoint: /app/runs/atlas_40m_local/checkpoints/"
-    echo "Metrics: /app/runs/atlas_40m_local/metrics_stream.jsonl"
-    echo ""
-    echo "To prevent shutdown, run: touch /tmp/keep_alive"
-    echo ""
-
-    # Give user 60 seconds to intervene
-    for i in {60..1}; do
-        if [ -f "/tmp/keep_alive" ]; then
-            echo "Keep-alive file detected. Pod will NOT be stopped."
-            echo "Remove /tmp/keep_alive and the pod will stop on next training completion."
-            exit 0
-        fi
-        echo -ne "Stopping in $i seconds...\r"
-        sleep 1
-    done
-
-    echo ""
-    echo "Stopping RunPod pod: $RUNPOD_POD_ID"
-
-    # Try runpodctl first (available in RunPod containers)
-    if command -v runpodctl &> /dev/null; then
-        runpodctl stop pod $RUNPOD_POD_ID || true
-    fi
-
-    # Also try the API directly as fallback
-    if [ -n "$RUNPOD_API_KEY" ]; then
-        curl -s -X POST "https://api.runpod.io/graphql" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $RUNPOD_API_KEY" \
-            -d "{\"query\": \"mutation { podStop(input: {podId: \\\"$RUNPOD_POD_ID\\\"}) { id } }\"}" \
-            || true
-    fi
-
-    echo "Stop command sent. Pod should power down shortly."
-else
-    echo "Not running on RunPod. Container will exit normally."
-fi
-
-exit $TRAINING_EXIT_CODE
+# If dashboard exits, keep container alive
+echo "Dashboard exited. Container will stay alive."
+echo "Restart dashboard with: python -m streamlit run training_framework/monitoring/streamlit_monitor.py --server.port 8501 --server.address 0.0.0.0"
+tail -f /dev/null
