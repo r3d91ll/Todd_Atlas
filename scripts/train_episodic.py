@@ -65,26 +65,31 @@ def load_config(config_path: str) -> dict:
 
 
 def create_model_from_config(config: dict) -> AtlasOmega:
-    """Create model from configuration."""
+    """Create model from configuration.
+
+    Uses explicit config values when provided, falling back to factory
+    functions only for specific parameter counts that match standard configs.
+    """
     model_cfg = config.get('model', {})
 
-    # Check for factory function shortcuts
+    # Check for explicit custom configuration
     d_model = model_cfg.get('d_model', 384)
     n_layers = model_cfg.get('n_layers', 8)
 
-    # Rough parameter estimate to select factory
+    # Rough parameter estimate
     approx_params = d_model * d_model * n_layers * 12  # Very rough
 
-    if approx_params < 50_000_000:
-        print("Using 40M model configuration")
+    # Only use factory functions for exact standard configs
+    # Otherwise always use explicit config (allows custom 10M models etc)
+    if d_model == 384 and n_layers == 8 and model_cfg.get('use_factory', False):
+        print("Using 40M model configuration (factory)")
         return create_atlas_omega_40m()
-    elif approx_params < 200_000_000:
-        print("Using custom model configuration")
-    else:
-        print("Using 389M model configuration")
+    elif d_model == 768 and n_layers == 12 and model_cfg.get('use_factory', False):
+        print("Using 389M model configuration (factory)")
         return create_atlas_omega_389m()
 
-    # Create from explicit config
+    # Create from explicit config (default path for custom sizes)
+    print(f"Using custom model configuration: d={d_model}, L={n_layers}")
     atlas_config = AtlasOmegaConfig(
         d_model=model_cfg.get('d_model', 384),
         n_layers=model_cfg.get('n_layers', 8),
