@@ -386,6 +386,197 @@ def page_alerts_health(df: pd.DataFrame, latest: Dict[str, Any]):
             st.dataframe(df.tail(100))
 
 
+# === Page 4: Grokking & Geometry ===
+def page_grokking_geometry(df: pd.DataFrame, latest: Dict[str, Any]):
+    """Grokking detection and geometric structure page."""
+    st.title("🔮 Grokking & Geometry")
+
+    # Check if grokking metrics are available
+    grokking_cols = [c for c in df.columns if c.startswith('grokking/')]
+
+    if not grokking_cols:
+        st.warning("Grokking metrics not detected. Enable grokking detection in config:")
+        st.code("""
+monitoring:
+  grokking:
+    enabled: true
+    metrics_interval: 500
+        """)
+        return
+
+    # Current grokking phase
+    st.subheader("Current Grokking Phase")
+
+    phase = latest.get('grokking/phase', 'unknown')
+    phase_colors = {
+        'memorization': '🟡',
+        'circuit_formation': '🟠',
+        'cleanup': '🔵',
+        'grokked': '🟢',
+        'unknown': '⚪',
+        'insufficient_data': '⚪',
+    }
+    phase_icon = phase_colors.get(phase, '⚪')
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("Phase", f"{phase_icon} {phase}")
+
+    with col2:
+        fourier = latest.get('grokking/embedding_fourier_concentration', 0)
+        st.metric("Fourier Concentration", f"{fourier:.3f}")
+
+    with col3:
+        circular = latest.get('grokking/embedding_circular_fit', 0)
+        st.metric("Circular Fit", f"{circular:.3f}")
+
+    with col4:
+        dim_ratio = latest.get('grokking/embedding_effective_dim_ratio', 0)
+        st.metric("Effective Dim Ratio", f"{dim_ratio:.1%}")
+
+    st.divider()
+
+    # Grokking timeline
+    st.subheader("Grokking Metrics Over Time")
+
+    # Prepare data
+    grok_df = df[['step'] + grokking_cols].dropna()
+
+    if not grok_df.empty:
+        # Create subplot figure
+        fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=[
+                "Fourier Concentration",
+                "Circular Fit",
+                "Effective Dim Ratio",
+                "Memory Rank"
+            ]
+        )
+
+        # Fourier concentration
+        if 'grokking/embedding_fourier_concentration' in grok_df.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=grok_df['step'],
+                    y=grok_df['grokking/embedding_fourier_concentration'],
+                    name='Fourier',
+                    line=dict(color='blue')
+                ),
+                row=1, col=1
+            )
+            fig.add_hline(y=0.5, line_dash="dash", line_color="green",
+                         row=1, col=1, annotation_text="Target")
+
+        # Circular fit
+        if 'grokking/embedding_circular_fit' in grok_df.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=grok_df['step'],
+                    y=grok_df['grokking/embedding_circular_fit'],
+                    name='Circular',
+                    line=dict(color='purple')
+                ),
+                row=1, col=2
+            )
+            fig.add_hline(y=0.8, line_dash="dash", line_color="green",
+                         row=1, col=2, annotation_text="Target")
+
+        # Effective dimensionality ratio
+        if 'grokking/embedding_effective_dim_ratio' in grok_df.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=grok_df['step'],
+                    y=grok_df['grokking/embedding_effective_dim_ratio'],
+                    name='Dim Ratio',
+                    line=dict(color='orange')
+                ),
+                row=2, col=1
+            )
+            fig.add_hline(y=0.3, line_dash="dash", line_color="green",
+                         row=2, col=1, annotation_text="Target")
+
+        # Memory rank
+        if 'grokking/memory_rank' in grok_df.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=grok_df['step'],
+                    y=grok_df['grokking/memory_rank'],
+                    name='Mem Rank',
+                    line=dict(color='red')
+                ),
+                row=2, col=2
+            )
+
+        fig.update_layout(height=600, showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # Grokking interpretation
+    st.subheader("Interpretation Guide")
+
+    with st.expander("Understanding Grokking Metrics"):
+        st.markdown("""
+**Grokking Phases:**
+- 🟡 **Memorization**: Model memorizes training data but hasn't developed structure
+- 🟠 **Circuit Formation**: Geometric structure emerging (metrics improving)
+- 🔵 **Cleanup**: Generalization happening (retrieval accuracy jumping)
+- 🟢 **Grokked**: Stable performance + stable geometry (ready for Kakeya extraction)
+
+**Metrics:**
+- **Fourier Concentration**: Energy in low-frequency components. Higher = more periodic structure.
+- **Circular Fit**: How well embeddings fit a circle in 2D PCA. Higher = more organized geometry.
+- **Effective Dim Ratio**: Fraction of dimensions needed for 95% variance. Lower = more compressed representation.
+- **Memory Rank**: Numerical rank of memory matrices. Indicates structure in learned associations.
+
+**Targets for Grokking:**
+- Fourier Concentration > 0.5
+- Circular Fit > 0.8
+- Effective Dim Ratio < 0.3
+- Stable retrieval accuracy > 70%
+        """)
+
+    # Retrieval vs grokking correlation
+    st.subheader("Retrieval Accuracy vs Grokking")
+
+    ret_acc_col = None
+    for col in ['retrieval_accuracy_mean', 'retrieval_token_accuracy']:
+        if col in df.columns:
+            ret_acc_col = col
+            break
+
+    if ret_acc_col and 'grokking/embedding_fourier_concentration' in df.columns:
+        corr_df = df[['step', ret_acc_col, 'grokking/embedding_fourier_concentration']].dropna()
+
+        if not corr_df.empty:
+            fig_corr = go.Figure()
+
+            fig_corr.add_trace(go.Scatter(
+                x=corr_df['step'],
+                y=corr_df[ret_acc_col],
+                name='Retrieval Accuracy',
+                yaxis='y1'
+            ))
+
+            fig_corr.add_trace(go.Scatter(
+                x=corr_df['step'],
+                y=corr_df['grokking/embedding_fourier_concentration'],
+                name='Fourier Concentration',
+                yaxis='y2'
+            ))
+
+            fig_corr.update_layout(
+                title="Retrieval Accuracy & Fourier Concentration",
+                yaxis=dict(title='Retrieval Accuracy', side='left'),
+                yaxis2=dict(title='Fourier Concentration', side='right', overlaying='y'),
+                height=400
+            )
+
+            st.plotly_chart(fig_corr, use_container_width=True)
+
+
 # === Main App ===
 def main():
     # Parse arguments
@@ -434,7 +625,7 @@ def main():
     # Page selection
     page = st.sidebar.radio(
         "Page",
-        ["Live Overview", "Memory Deep Dive", "Alerts & Health"]
+        ["Live Overview", "Memory Deep Dive", "Grokking & Geometry", "Alerts & Health"]
     )
 
     st.sidebar.markdown("---")
@@ -446,6 +637,8 @@ def main():
         page_live_overview(df, latest)
     elif page == "Memory Deep Dive":
         page_memory_deep_dive(df, latest)
+    elif page == "Grokking & Geometry":
+        page_grokking_geometry(df, latest)
     else:
         page_alerts_health(df, latest)
 
