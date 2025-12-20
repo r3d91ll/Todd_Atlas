@@ -33,6 +33,17 @@ try:
 except ImportError:
     ALERTS_AVAILABLE = False
 
+# Import grokking metrics (optional)
+try:
+    from training_framework.monitoring.grokking_metrics import (
+        GrokkingDetector,
+        GrokkingConfig,
+        create_grokking_detector,
+    )
+    GROKKING_AVAILABLE = True
+except ImportError:
+    GROKKING_AVAILABLE = False
+
 
 class TrainingPhase(Enum):
     """Training phase for gate floor scheduling."""
@@ -108,6 +119,10 @@ class TrainerConfig:
     # Telegram alerts (optional)
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+
+    # Grokking detection (optional)
+    grokking_enabled: bool = False
+    grokking_interval: int = 500
 
 
 class EpisodicDDPTrainer:
@@ -215,6 +230,17 @@ class EpisodicDDPTrainer:
                 f'🚀 Atlas training started: {config.max_steps} steps, {config.device}'
             )
             print("Telegram alerts enabled")
+
+        # Grokking detection (optional)
+        self.grokking_detector = None
+        self._last_grokking_metrics = None
+        if GROKKING_AVAILABLE and config.grokking_enabled:
+            grok_config = GrokkingConfig(
+                enabled=True,
+                metrics_interval=config.grokking_interval,
+            )
+            self.grokking_detector = GrokkingDetector(grok_config)
+            print(f"Grokking detection enabled (interval: {config.grokking_interval} steps)")
 
         # Initialize gate floor
         self._update_gate_floor()
@@ -535,6 +561,32 @@ class EpisodicDDPTrainer:
         verifier_stats = self.retrieval_verifier.get_statistics()
         metrics['verifier_success_rate'] = verifier_stats['success_rate']
         metrics['verifier_buffer_size'] = verifier_stats['buffer_size']
+
+        # Grokking metrics (computed at interval)
+        if self.grokking_detector is not None:
+            if self.global_step % self.config.grokking_interval == 0:
+                val_metrics = {
+                    'retrieval_accuracy': episode_metrics.get('retrieval_accuracy_mean', 0),
+                }
+                grok_metrics = self.grokking_detector.compute_metrics(
+                    model=model,
+                    step=self.global_step,
+                    val_metrics=val_metrics,
+                )
+                self._last_grokking_metrics = grok_metrics
+                metrics.update(grok_metrics.to_dict())
+
+                # Log grokking phase
+                if self.global_step % self.config.log_interval == 0:
+                    print(
+                        f"  [Grokking] Phase: {grok_metrics.phase} | "
+                        f"Fourier: {grok_metrics.embedding_fourier_concentration:.3f} | "
+                        f"Circular: {grok_metrics.embedding_circular_fit:.3f} | "
+                        f"EffDim: {grok_metrics.embedding_effective_dim_ratio:.1%}"
+                    )
+            elif self._last_grokking_metrics is not None:
+                # Include last computed grokking phase in metrics
+                metrics['grokking/phase'] = self._last_grokking_metrics.phase
 
         return metrics
 

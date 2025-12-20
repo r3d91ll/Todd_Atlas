@@ -308,6 +308,9 @@ def create_trainer_config(config: dict) -> TrainerConfig:
     monitoring_cfg = config.get('monitoring', {})
     telegram_cfg = monitoring_cfg.get('telegram', {})
 
+    # Get grokking config
+    grokking_cfg = monitoring_cfg.get('grokking', {})
+
     return TrainerConfig(
         max_steps=int(training_cfg.get('max_steps', 5000)),
         learning_rate=float(training_cfg.get('learning_rate', 3e-4)),
@@ -327,6 +330,8 @@ def create_trainer_config(config: dict) -> TrainerConfig:
         episodic=ep_config,
         telegram_bot_token=str(telegram_cfg.get('bot_token', '')),
         telegram_chat_id=str(telegram_cfg.get('chat_id', '')),
+        grokking_enabled=bool(grokking_cfg.get('enabled', False)),
+        grokking_interval=int(grokking_cfg.get('metrics_interval', 500)),
     )
 
 
