@@ -13,7 +13,21 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+from enum import Enum
 from typing import Optional, Tuple
+
+
+class GateMode(Enum):
+    """
+    Gate operation modes for episodic memory training.
+
+    NORMAL: Standard learned gating
+    STORAGE: Force high gate values (memory writes)
+    RETRIEVAL: Ensure minimum gate values (memory reads)
+    """
+    NORMAL = "normal"
+    STORAGE = "storage"
+    RETRIEVAL = "retrieval"
 
 
 class SlidingWindowAttention(nn.Module):
@@ -147,15 +161,33 @@ class GatingMechanism(nn.Module):
         g = sigmoid(W_g · [mem_out, attn_out])
         output = g * mem_out + (1 - g) * attn_out
 
+    Enhanced with mode-based gate control for episodic memory training:
+    - NORMAL: Standard learned gating with optional floor
+    - STORAGE: Force high gate values (memory writes)
+    - RETRIEVAL: Ensure minimum gate values (memory reads)
+
     Args:
         d_model: Model dimension
+        gate_floor: Minimum gate value (prevents complete memory bypass)
     """
 
-    def __init__(self, d_model: int):
+    def __init__(self, d_model: int, gate_floor: float = 0.0):
         super().__init__()
 
         # Gate projection: takes concatenated inputs
         self.gate_proj = nn.Linear(2 * d_model, d_model, bias=True)
+
+        # Mode and floor settings
+        self._mode = GateMode.NORMAL
+        self._gate_floor = gate_floor
+
+        # Mode-specific targets
+        self._storage_gate_target = 0.8  # During storage, push gate toward this
+        self._retrieval_gate_floor = 0.3  # During retrieval, minimum gate
+
+        # Store last gate values for metrics
+        self._last_raw_gate: Optional[torch.Tensor] = None
+        self._last_gate: Optional[torch.Tensor] = None
 
         self._init_weights()
 
@@ -163,6 +195,30 @@ class GatingMechanism(nn.Module):
         # Initialize to favor balanced combination
         nn.init.xavier_uniform_(self.gate_proj.weight)
         nn.init.zeros_(self.gate_proj.bias)
+
+    def set_mode(self, mode: GateMode) -> None:
+        """Set the gate operation mode."""
+        self._mode = mode
+
+    def get_mode(self) -> GateMode:
+        """Get the current gate operation mode."""
+        return self._mode
+
+    def set_gate_floor(self, floor: float) -> None:
+        """Set the minimum gate value (0.0 to 1.0)."""
+        self._gate_floor = max(0.0, min(1.0, floor))
+
+    def get_gate_floor(self) -> float:
+        """Get the current gate floor."""
+        return self._gate_floor
+
+    def set_storage_target(self, target: float) -> None:
+        """Set the target gate value during storage mode."""
+        self._storage_gate_target = max(0.0, min(1.0, target))
+
+    def set_retrieval_floor(self, floor: float) -> None:
+        """Set the minimum gate value during retrieval mode."""
+        self._retrieval_gate_floor = max(0.0, min(1.0, floor))
 
     def forward(
         self,
@@ -185,15 +241,44 @@ class GatingMechanism(nn.Module):
         # Concatenate inputs
         combined = torch.cat([mem_out, attn_out], dim=-1)
 
-        # Compute gate
-        gate = torch.sigmoid(self.gate_proj(combined))
+        # Compute raw gate (before mode adjustments)
+        raw_gate = torch.sigmoid(self.gate_proj(combined))
 
-        # Apply gate
+        # Store raw gate for metrics
+        self._last_raw_gate = raw_gate.detach()
+
+        # Apply mode-specific gate constraints
+        if self._mode == GateMode.STORAGE:
+            # During storage: push gate toward high value (encourage memory writes)
+            gate = torch.max(raw_gate, torch.full_like(raw_gate, self._storage_gate_target))
+        elif self._mode == GateMode.RETRIEVAL:
+            # During retrieval: ensure minimum gate (encourage memory reads)
+            gate = torch.max(raw_gate, torch.full_like(raw_gate, self._retrieval_gate_floor))
+        else:
+            # Normal mode: apply gate floor
+            if self._gate_floor > 0:
+                gate = torch.max(raw_gate, torch.full_like(raw_gate, self._gate_floor))
+            else:
+                gate = raw_gate
+
+        # Store applied gate for metrics
+        self._last_gate = gate.detach()
+
+        # Apply gate: high gate = use memory, low gate = use attention
         output = gate * mem_out + (1 - gate) * attn_out
 
         if return_gate:
             return output, gate
         return output, None
+
+    def get_last_gates(self) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """
+        Get the last raw and applied gate values.
+
+        Returns:
+            Tuple of (raw_gate, applied_gate)
+        """
+        return self._last_raw_gate, self._last_gate
 
 
 class FeedForward(nn.Module):
