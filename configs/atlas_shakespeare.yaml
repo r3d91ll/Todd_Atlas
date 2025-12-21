@@ -32,7 +32,7 @@ model:
 training:
   max_steps: 10000      # More steps for smaller corpus
   learning_rate: 3e-4
-  weight_decay: 0.1
+  weight_decay: 1.0     # Critical for grokking (was 0.1)
   warmup_steps: 500
   grad_clip: 1.0
 
@@ -69,6 +69,17 @@ episodic:
 
   reset_memory_between_episodes: false
 
+# Dynamic weight decay (adjusts automatically based on excluded_loss)
+dynamic_weight_decay:
+  enabled: true
+  initial: 1.0          # Starting weight decay (matches training.weight_decay)
+  min_value: 0.1        # Minimum allowed
+  max_value: 10.0       # Maximum allowed
+  adjustment_factor: 1.5  # Multiply by this when adjusting
+  patience_steps: 1000    # Steps without progress before adjustment
+  excluded_loss_threshold: 0.01  # Minimum change to consider "progress"
+  cooldown_steps: 500     # Steps to wait after adjustment
+
 monitoring:
   dashboard_enabled: true
   dashboard_port: 8501
@@ -85,6 +96,16 @@ monitoring:
     fourier_concentration_target: 0.5   # Higher = more structured
     circular_fit_target: 0.8            # Higher = more circular
     effective_dim_ratio_target: 0.3     # Lower = more compressed
+
+    # Excluded loss thresholds (PRIMARY grokking indicator)
+    excluded_loss_rising_threshold: 0.01   # Trend > this = circuit formation
+    excluded_loss_falling_threshold: -0.01 # Trend < this = cleanup phase
+
+    # Frequency ablation for excluded/restricted loss computation
+    frequency_ablation:
+      enabled: true
+      top_k: 10               # Number of key frequencies to analyze
+      use_magnitude_ranking: true
 
   alerts:
     gate_collapse_risk:

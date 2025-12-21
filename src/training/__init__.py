@@ -9,20 +9,28 @@ from .episodic_trainer import (
     EpisodePhase,
 )
 from .retrieval_verifier import RetrievalVerifier, StorageRecord
+from .weight_decay_scheduler import (
+    DynamicWeightDecayScheduler,
+    WeightDecayConfig,
+    create_weight_decay_scheduler,
+)
 
 __all__ = [
     "AtlasTrainer",
-    "TNTTrainer",
-    "DDPTrainer",
-    "setup_ddp",
     "cleanup_ddp",
+    "create_weight_decay_scheduler",
+    "DDPTrainer",
+    "DynamicWeightDecayScheduler",
+    "EpisodicConfig",
+    "EpisodicDDPTrainer",
+    "EpisodePhase",
     "is_main_process",
     "MetricsLogger",
-    "EpisodicDDPTrainer",
-    "EpisodicConfig",
+    "RetrievalVerifier",
+    "setup_ddp",
+    "StorageRecord",
+    "TNTTrainer",
     "TrainerConfig",
     "TrainingPhase",
-    "EpisodePhase",
-    "RetrievalVerifier",
-    "StorageRecord",
+    "WeightDecayConfig",
 ]

@@ -9,9 +9,15 @@ Key metrics:
 - Circular fit: Detect circular organization in 2D PCA projection
 - Effective dimensionality: Track compression of representations
 - Embedding entropy: Measure organization of embedding space
+- **Excluded loss**: Loss with key frequencies REMOVED (PRIMARY grokking indicator)
+- **Restricted loss**: Loss with ONLY key frequencies kept
 
 These metrics help detect when the model has developed stable internal
 geometry suitable for Kakeya set extraction.
+
+The excluded_loss metric is the PRIMARY leading indicator for grokking:
+- Rising excluded_loss = circuits forming (grokking imminent)
+- Flat excluded_loss = stuck in memorization (may need weight decay adjustment)
 
 References:
 - Power et al. (2022): "Grokking: Generalization Beyond Overfitting"
@@ -21,9 +27,12 @@ References:
 import logging
 import numpy as np
 import torch
+import torch.nn as nn
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Callable
 from collections import deque
+
+from .frequency_ablation import FrequencyAblator, FrequencyAblationConfig
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +53,15 @@ class GrokkingConfig:
 
     # Trend detection window
     trend_window: int = 10  # Number of measurements for trend
+
+    # Frequency ablation config
+    frequency_ablation: FrequencyAblationConfig = field(
+        default_factory=lambda: FrequencyAblationConfig()
+    )
+
+    # Excluded loss thresholds for phase detection
+    excluded_loss_rising_threshold: float = 0.01  # Trend to consider "rising"
+    excluded_loss_falling_threshold: float = -0.01  # Trend to consider "falling"
 
 
 @dataclass
@@ -71,6 +89,11 @@ class GrokkingMetrics:
     hidden_effective_dim: float = 0.0
     hidden_entropy: float = 0.0
 
+    # Frequency ablation metrics (PRIMARY grokking indicators)
+    excluded_loss: float = 0.0  # Loss with key frequencies REMOVED
+    restricted_loss: float = 0.0  # Loss with ONLY key frequencies kept
+    excluded_loss_trend: float = 0.0  # Rate of change (positive = rising = grokking)
+
     # Grokking phase detection
     phase: str = "unknown"  # memorization, circuit_formation, cleanup, grokked
 
@@ -89,6 +112,9 @@ class GrokkingMetrics:
             "grokking/memory_rank": self.memory_rank,
             "grokking/hidden_effective_dim": self.hidden_effective_dim,
             "grokking/hidden_entropy": self.hidden_entropy,
+            "grokking/excluded_loss": self.excluded_loss,
+            "grokking/restricted_loss": self.restricted_loss,
+            "grokking/excluded_loss_trend": self.excluded_loss_trend,
             "grokking/phase": self.phase,
         }
 
@@ -100,11 +126,12 @@ class GrokkingDetector:
     Adapted for Atlas architecture:
     - Analyzes input embeddings (like standard transformers)
     - Analyzes memory matrices W (Atlas-specific)
-    - Uses retrieval accuracy as primary grokking signal
+    - Uses excluded_loss as PRIMARY grokking signal (rising = circuits forming)
+    - Uses retrieval accuracy as secondary validation signal
 
     Grokking Phases:
     1. memorization: Train accuracy high, val accuracy low, no structure
-    2. circuit_formation: Geometric metrics improving, val flat
+    2. circuit_formation: excluded_loss RISING, geometric metrics improving
     3. cleanup: Val accuracy jumping, structure solidifying
     4. grokked: Stable high performance + stable geometry
     """
@@ -112,7 +139,11 @@ class GrokkingDetector:
     def __init__(self, config: GrokkingConfig):
         self.config = config
         self.history: deque = deque(maxlen=100)  # Keep last 100 measurements
+        self.excluded_loss_history: deque = deque(maxlen=100)  # Track excluded_loss separately
         self.last_metrics: Optional[GrokkingMetrics] = None
+
+        # Initialize frequency ablator
+        self.frequency_ablator = FrequencyAblator(config.frequency_ablation)
 
     def compute_metrics(
         self,
@@ -120,6 +151,9 @@ class GrokkingDetector:
         step: int,
         train_metrics: Optional[Dict] = None,
         val_metrics: Optional[Dict] = None,
+        input_ids: Optional[torch.Tensor] = None,
+        labels: Optional[torch.Tensor] = None,
+        criterion: Optional[nn.Module] = None,
     ) -> GrokkingMetrics:
         """
         Compute all grokking-related metrics.
@@ -129,6 +163,9 @@ class GrokkingDetector:
             step: Current training step
             train_metrics: Optional dict with train_loss, train_accuracy
             val_metrics: Optional dict with val_loss, val_accuracy, retrieval_accuracy
+            input_ids: Optional batch input for frequency ablation
+            labels: Optional batch labels for frequency ablation
+            criterion: Optional loss function for frequency ablation
 
         Returns:
             GrokkingMetrics with all computed values
@@ -166,7 +203,26 @@ class GrokkingDetector:
             # 3. Hidden state metrics (if available from forward pass)
             # These would need to be passed in from the training loop
 
-        # 4. Phase detection
+        # 4. Frequency ablation metrics (PRIMARY grokking indicator)
+        if (
+            self.config.frequency_ablation.enabled
+            and input_ids is not None
+            and labels is not None
+            and criterion is not None
+        ):
+            excluded_loss, restricted_loss = self.frequency_ablator.compute_ablated_losses(
+                model, input_ids, labels, criterion
+            )
+            metrics.excluded_loss = excluded_loss
+            metrics.restricted_loss = restricted_loss
+
+            # Track excluded_loss history and compute trend
+            self.excluded_loss_history.append(excluded_loss)
+            if len(self.excluded_loss_history) >= self.config.trend_window:
+                recent_excluded = list(self.excluded_loss_history)[-self.config.trend_window:]
+                metrics.excluded_loss_trend = self._compute_trend(recent_excluded)
+
+        # 5. Phase detection
         metrics.phase = self._detect_phase(metrics, train_metrics, val_metrics)
 
         # Store for history
@@ -414,30 +470,37 @@ class GrokkingDetector:
         """
         Detect current grokking phase based on metrics and trends.
 
+        PRIMARY signal: excluded_loss_trend
+        - Rising excluded_loss = circuits forming (grokking imminent)
+        - Flat excluded_loss = stuck in memorization
+
+        SECONDARY signals: fourier/circular trends, retrieval accuracy
+
         Phases:
-        - memorization: High train acc, low val/retrieval acc, low structure
-        - circuit_formation: Structure metrics increasing
-        - cleanup: Val/retrieval acc jumping up
-        - grokked: Stable high performance + stable structure
+        - memorization: Flat excluded_loss, low val/retrieval acc, no structure
+        - circuit_formation: excluded_loss RISING, geometric metrics improving
+        - cleanup: Val/retrieval acc jumping up, excluded_loss stabilizing
+        - grokked: Stable high performance + stable geometry
         """
         if len(self.history) < self.config.trend_window:
             return "insufficient_data"
 
         recent = list(self.history)[-self.config.trend_window:]
 
-        # Compute trends
+        # PRIMARY: excluded_loss trend (most reliable grokking indicator)
+        excluded_trend = metrics.excluded_loss_trend
+        excluded_rising = excluded_trend > self.config.excluded_loss_rising_threshold
+        excluded_falling = excluded_trend < self.config.excluded_loss_falling_threshold
+        excluded_stable = not excluded_rising and not excluded_falling
+
+        # SECONDARY: geometric structure trends
         fourier_trend = self._compute_trend([m.embedding_fourier_concentration for m in recent])
         circular_trend = self._compute_trend([m.embedding_circular_fit for m in recent])
-        # TODO: incorporate dim_trend into phase detection
-        _dim_trend = self._compute_trend([m.embedding_effective_dim_ratio for m in recent])
 
-        # Get retrieval accuracy if available (primary grokking signal for Atlas)
+        # Get retrieval accuracy if available
         retrieval_acc = val_metrics.get("retrieval_accuracy", 0) if val_metrics else 0
-        # TODO: incorporate train/val accuracy gap into phase detection
-        _train_acc = train_metrics.get("accuracy", 0) if train_metrics else 0
-        _val_acc = val_metrics.get("accuracy", 0) if val_metrics else 0
 
-        # Phase detection logic
+        # Phase detection logic (excluded_loss is PRIMARY)
         structure_improving = (fourier_trend > 0.001 or circular_trend > 0.001)
         structure_stable = abs(fourier_trend) < 0.0001 and abs(circular_trend) < 0.0001
 
@@ -447,13 +510,17 @@ class GrokkingDetector:
             metrics.embedding_circular_fit > self.config.circular_fit_target
         )
 
-        if high_retrieval and high_structure and structure_stable:
+        # Phase determination with excluded_loss as PRIMARY signal
+        if high_retrieval and high_structure and structure_stable and excluded_stable:
             return "grokked"
-        elif high_retrieval or structure_improving:
+        elif excluded_falling or high_retrieval:
+            # excluded_loss falling means circuits solidifying (cleanup phase)
             return "cleanup"
-        elif structure_improving:
+        elif excluded_rising or structure_improving:
+            # excluded_loss rising is the PRIMARY indicator of circuit formation
             return "circuit_formation"
         else:
+            # Flat excluded_loss + no structure improvement = stuck memorizing
             return "memorization"
 
     def _compute_trend(self, values: List[float]) -> float:
@@ -486,6 +553,9 @@ class GrokkingDetector:
             "embedding_circular": latest.embedding_circular_fit,
             "embedding_dim_ratio": latest.embedding_effective_dim_ratio,
             "memory_rank": latest.memory_rank,
+            "excluded_loss": latest.excluded_loss,
+            "restricted_loss": latest.restricted_loss,
+            "excluded_loss_trend": latest.excluded_loss_trend,
             "has_grokked": self.has_grokked(),
             "measurements": len(self.history),
         }
@@ -494,6 +564,14 @@ class GrokkingDetector:
 def create_grokking_detector(config_dict: Dict) -> GrokkingDetector:
     """Create detector from config dictionary."""
     grok_config = config_dict.get("monitoring", {}).get("grokking", {})
+    freq_config = grok_config.get("frequency_ablation", {})
+
+    # Build frequency ablation config
+    freq_ablation_config = FrequencyAblationConfig(
+        enabled=freq_config.get("enabled", True),
+        top_k=freq_config.get("top_k", 10),
+        use_magnitude_ranking=freq_config.get("use_magnitude_ranking", True),
+    )
 
     config = GrokkingConfig(
         enabled=grok_config.get("enabled", True),
@@ -504,6 +582,9 @@ def create_grokking_detector(config_dict: Dict) -> GrokkingDetector:
         fourier_concentration_target=grok_config.get("fourier_concentration_target", 0.5),
         circular_fit_target=grok_config.get("circular_fit_target", 0.8),
         effective_dim_ratio_target=grok_config.get("effective_dim_ratio_target", 0.3),
+        frequency_ablation=freq_ablation_config,
+        excluded_loss_rising_threshold=grok_config.get("excluded_loss_rising_threshold", 0.01),
+        excluded_loss_falling_threshold=grok_config.get("excluded_loss_falling_threshold", -0.01),
     )
 
     return GrokkingDetector(config)

@@ -44,6 +44,17 @@ try:
 except ImportError:
     GROKKING_AVAILABLE = False
 
+# Import weight decay scheduler (optional)
+try:
+    from .weight_decay_scheduler import (
+        DynamicWeightDecayScheduler,
+        WeightDecayConfig,
+        create_weight_decay_scheduler,
+    )
+    WEIGHT_DECAY_SCHEDULER_AVAILABLE = True
+except ImportError:
+    WEIGHT_DECAY_SCHEDULER_AVAILABLE = False
+
 
 class TrainingPhase(Enum):
     """Training phase for gate floor scheduling."""
@@ -123,6 +134,13 @@ class TrainerConfig:
     # Grokking detection (optional)
     grokking_enabled: bool = False
     grokking_interval: int = 500
+
+    # Dynamic weight decay (optional, requires grokking detection)
+    dynamic_weight_decay_enabled: bool = False
+    dynamic_weight_decay_initial: float = 1.0
+    dynamic_weight_decay_max: float = 10.0
+    dynamic_weight_decay_factor: float = 1.5
+    dynamic_weight_decay_patience: int = 1000
 
 
 class EpisodicDDPTrainer:
@@ -213,6 +231,9 @@ class EpisodicDDPTrainer:
         # Memory states (passed through forward)
         self.memory_states: Optional[List[Tuple]] = None
 
+        # Last batch (for frequency ablation in grokking detection)
+        self._last_episode_batch: Optional[Dict[str, torch.Tensor]] = None
+
         # Metrics
         self._metrics_buffer: List[Dict[str, Any]] = []
         self._start_time = time.time()
@@ -241,6 +262,28 @@ class EpisodicDDPTrainer:
             )
             self.grokking_detector = GrokkingDetector(grok_config)
             print(f"Grokking detection enabled (interval: {config.grokking_interval} steps)")
+
+        # Dynamic weight decay scheduler (optional, requires grokking detection)
+        self.weight_decay_scheduler = None
+        if (
+            WEIGHT_DECAY_SCHEDULER_AVAILABLE
+            and config.dynamic_weight_decay_enabled
+            and self.grokking_detector is not None
+        ):
+            wd_config = WeightDecayConfig(
+                enabled=True,
+                initial=config.dynamic_weight_decay_initial,
+                max_value=config.dynamic_weight_decay_max,
+                adjustment_factor=config.dynamic_weight_decay_factor,
+                patience_steps=config.dynamic_weight_decay_patience,
+            )
+            self.weight_decay_scheduler = DynamicWeightDecayScheduler(
+                self.optimizer, wd_config
+            )
+            print(
+                f"Dynamic weight decay enabled (initial: {config.dynamic_weight_decay_initial}, "
+                f"max: {config.dynamic_weight_decay_max})"
+            )
 
         # Initialize gate floor
         self._update_gate_floor()
@@ -492,6 +535,7 @@ class EpisodicDDPTrainer:
         for i in range(self.ep_config.retrieval_samples):
             # Reuse stored batches (cycle if retrieval_samples > storage_samples)
             batch = episode_batches[i % len(episode_batches)]
+            self._last_episode_batch = batch  # Save for frequency ablation
             metrics = self._retrieval_step(batch)
             episode_metrics['retrieval_losses'].append(metrics['loss'])
 
@@ -567,18 +611,43 @@ class EpisodicDDPTrainer:
                 val_metrics = {
                     'retrieval_accuracy': episode_metrics.get('retrieval_accuracy_mean', 0),
                 }
+
+                # Prepare batch data for frequency ablation
+                input_ids = None
+                labels = None
+                criterion = None
+                if self._last_episode_batch is not None:
+                    input_ids = self._last_episode_batch.get('input_ids', self._last_episode_batch.get('inputs'))
+                    labels = self._last_episode_batch.get('labels', input_ids)
+                    criterion = nn.CrossEntropyLoss(ignore_index=-100)
+
                 grok_metrics = self.grokking_detector.compute_metrics(
                     model=model,
                     step=self.global_step,
                     val_metrics=val_metrics,
+                    input_ids=input_ids,
+                    labels=labels,
+                    criterion=criterion,
                 )
                 self._last_grokking_metrics = grok_metrics
                 metrics.update(grok_metrics.to_dict())
 
+                # Dynamic weight decay adjustment based on excluded_loss
+                if self.weight_decay_scheduler is not None and grok_metrics.excluded_loss > 0:
+                    adjusted = self.weight_decay_scheduler.step(grok_metrics.excluded_loss)
+                    if adjusted:
+                        print(
+                            f"  [Weight Decay] Adjusted to "
+                            f"{self.weight_decay_scheduler.current_weight_decay:.4f}"
+                        )
+                    metrics.update(self.weight_decay_scheduler.get_stats())
+
                 # Log grokking phase
                 if self.global_step % self.config.log_interval == 0:
+                    excluded_str = f"ExclLoss: {grok_metrics.excluded_loss:.4f} | " if grok_metrics.excluded_loss > 0 else ""
                     print(
                         f"  [Grokking] Phase: {grok_metrics.phase} | "
+                        f"{excluded_str}"
                         f"Fourier: {grok_metrics.embedding_fourier_concentration:.3f} | "
                         f"Circular: {grok_metrics.embedding_circular_fit:.3f} | "
                         f"EffDim: {grok_metrics.embedding_effective_dim_ratio:.1%}"
@@ -586,6 +655,10 @@ class EpisodicDDPTrainer:
             elif self._last_grokking_metrics is not None:
                 # Include last computed grokking phase in metrics
                 metrics['grokking/phase'] = self._last_grokking_metrics.phase
+
+        # Weight decay scheduler stats (include even when not adjusting)
+        if self.weight_decay_scheduler is not None:
+            metrics['weight_decay/current'] = self.weight_decay_scheduler.current_weight_decay
 
         return metrics
 
@@ -690,6 +763,10 @@ class EpisodicDDPTrainer:
             },
         }
 
+        # Save weight decay scheduler state if present
+        if self.weight_decay_scheduler is not None:
+            checkpoint['weight_decay_scheduler_state'] = self.weight_decay_scheduler.state_dict()
+
         path = os.path.join(
             self.config.checkpoint_dir,
             f"checkpoint_{self.global_step}.pt"
@@ -713,6 +790,11 @@ class EpisodicDDPTrainer:
         self.global_step = checkpoint['step']
         self.total_episodes = checkpoint['episode']
         self.training_phase = TrainingPhase(checkpoint['training_phase'])
+
+        # Restore weight decay scheduler state if present
+        if self.weight_decay_scheduler is not None and 'weight_decay_scheduler_state' in checkpoint:
+            self.weight_decay_scheduler.load_state_dict(checkpoint['weight_decay_scheduler_state'])
+            print(f"  Weight decay restored: {self.weight_decay_scheduler.current_weight_decay:.4f}")
 
         self._update_gate_floor()
         print(f"Resumed from step {self.global_step}, episode {self.total_episodes}")
