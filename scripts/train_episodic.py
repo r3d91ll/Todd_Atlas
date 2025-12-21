@@ -420,11 +420,11 @@ def main():
     print("\n" + "=" * 60)
     print("TRAINING COMPLETE")
     print("=" * 60)
-    print(f"Final step:           {final_stats['final_step']}")
-    print(f"Total episodes:       {final_stats['total_episodes']}")
-    print(f"Best retrieval acc:   {final_stats['best_retrieval_accuracy']:.2%}")
-    print(f"Verifier success:     {final_stats['verifier_success_rate']:.2%}")
-    print(f"Training time:        {final_stats['training_time_hours']:.2f} hours")
+    print(f"Final step:           {final_stats.get('final_step', 'N/A')}")
+    print(f"Total episodes:       {final_stats.get('total_episodes', 'N/A')}")
+    print(f"Best retrieval acc:   {final_stats.get('best_retrieval_accuracy', 0.0):.2%}")
+    print(f"Verifier success:     {final_stats.get('verifier_success_rate', 0.0):.2%}")
+    print(f"Training time:        {final_stats.get('training_time_hours', 0.0):.2f} hours")
     print("=" * 60)
 
 
