@@ -191,8 +191,8 @@ class GrokkingDetector:
     def _get_embeddings(self, model: torch.nn.Module) -> Optional[np.ndarray]:
         """Extract token embeddings from model."""
         try:
-            # Try common attribute names
-            for attr in ["embed_tokens", "token_embedding", "wte", "embedding"]:
+            # Try common attribute names (including Atlas's token_emb)
+            for attr in ["token_emb", "embed_tokens", "token_embedding", "wte", "embedding"]:
                 if hasattr(model, attr):
                     emb = getattr(model, attr)
                     if hasattr(emb, "weight"):
