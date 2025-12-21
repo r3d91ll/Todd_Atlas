@@ -11,8 +11,21 @@ experiments/
 │   ├── 002_*/
 │   └── ...
 └── active/             # Currently running experiments
-    └── */
+    ├── shakespeare_kakeya/
+    └── dumas_kakeya/
 ```
+
+## Active Experiments
+
+### shakespeare_kakeya
+- 10M Atlas trained on Shakespeare (English)
+- Grokking detection + Kakeya geometry study
+- See: `active/shakespeare_kakeya/README.md`
+
+### dumas_kakeya
+- 10M Atlas trained on Dumas (French)
+- Controlled comparison with Shakespeare experiment
+- See: `active/dumas_kakeya/README.md`
 
 ## Archived Experiments
 
@@ -22,10 +35,6 @@ Each archived experiment contains:
 - `results/` - Outputs, metrics, and artifacts (if preserved)
 
 Archived experiments are valuable documentation of the research journey, including "failed" attempts that informed subsequent design decisions.
-
-## Active Experiments
-
-Experiments currently in progress. Once complete (successful or not), they should be moved to `archived/` with proper documentation.
 
 ## Naming Convention
 
