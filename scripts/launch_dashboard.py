@@ -63,7 +63,7 @@ def main():
         '--max-steps', str(args.max_steps),
     ]
 
-    print(f"Starting dashboard...")
+    print("Starting dashboard...")
     print(f"  Metrics: {args.metrics_path}")
     print(f"  URL: http://{args.host}:{args.port}")
     print()

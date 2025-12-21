@@ -37,7 +37,7 @@ Set these in RunPod's environment variables section:
 Mount your training data to `/data` in the container.
 
 For Dolmino data, the container expects:
-```
+```text
 /data/
 ├── ingredient1-common_crawl-high-quality_19_science_math_and_technology/
 │   ├── shard_00000000.jsonl.zst
@@ -126,7 +126,7 @@ Training data (1.2GB Dolmino literature corpus) is baked into the Docker image a
 ## Troubleshooting
 
 ### Container fails to start
-- Check if image pulled correctly: `docker pull ghcr.io/r3d91ll/atlas-training:v1.0.0`
+- Check if image pulled correctly: `docker pull ghcr.io/r3d91ll/atlas-training:v1.2.0`
 - Verify GPU is available: `nvidia-smi`
 
 ### No data found

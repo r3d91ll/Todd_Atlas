@@ -35,9 +35,6 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install additional monitoring dependencies
-RUN pip install --no-cache-dir streamlit plotly requests
-
 # Copy application code
 COPY src/ src/
 COPY training_framework/ training_framework/

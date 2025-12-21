@@ -6,11 +6,12 @@
 #   Cloud 389M:         docker compose up atlas-389m
 #   Build only:         docker compose build
 #
-# For Telegram alerts, create a .env file with:
+# Environment variables (create a .env file):
 #   TELEGRAM_BOT_TOKEN=your_token
 #   TELEGRAM_CHAT_ID=your_chat_id
-
-version: '3.8'
+#   LOCAL_DATA_PATH=/path/to/your/data  # For atlas-40m local training
+#   HOST_DATA_PATH=/data                # For atlas-389m cloud training
+#   METRICS_PATH=runs/atlas_40m_local/metrics_stream.jsonl  # For dashboard
 
 services:
   # Local 40M test on A6000 (cuda:1)
@@ -18,20 +19,16 @@ services:
     build: .
     image: atlas-training:latest
     container_name: atlas-40m-local
-    runtime: nvidia
     environment:
-      - NVIDIA_VISIBLE_DEVICES=1
       - CUDA_VISIBLE_DEVICES=0
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       - DATA_PATH=/data/ingredient1-common_crawl-high-quality_19_science_math_and_technology
     volumes:
-      # Training data (read-only)
-      - /home/todd/olympus/models/datasets/raw/dolma3/dolmino_mix_100B/data:/data:ro
+      # Training data (read-only) - set LOCAL_DATA_PATH in .env
+      - ${LOCAL_DATA_PATH:-/data}:/data:ro
       # Output directory (read-write)
       - ./runs:/app/runs
-      # Secrets file (if using YAML instead of env vars)
-      - ./configs/secrets.yaml:/app/configs/secrets.yaml:ro
     ports:
       - "8501:8501"
     command: ["./scripts/launch_40m_test.sh"]
@@ -48,9 +45,7 @@ services:
     build: .
     image: atlas-training:latest
     container_name: atlas-389m-cloud
-    runtime: nvidia
     environment:
-      - NVIDIA_VISIBLE_DEVICES=0
       - CUDA_VISIBLE_DEVICES=0
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
@@ -76,15 +71,17 @@ services:
     build: .
     image: atlas-training:latest
     container_name: atlas-dashboard
+    environment:
+      - METRICS_PATH=${METRICS_PATH:-runs/atlas_40m_local/metrics_stream.jsonl}
     volumes:
       - ./runs:/app/runs:ro
     ports:
       - "8501:8501"
     command: >
-      python -m streamlit run training_framework/monitoring/streamlit_monitor.py
+      sh -c "python -m streamlit run training_framework/monitoring/streamlit_monitor.py
       --server.port 8501
       --server.address 0.0.0.0
       --server.headless true
       --
-      --metrics-path runs/atlas_40m_local/metrics_stream.jsonl
-      --max-steps 5000
+      --metrics-path $$METRICS_PATH
+      --max-steps 5000"
