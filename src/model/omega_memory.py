@@ -543,11 +543,14 @@ class OmegaMemory(nn.Module):
         device = x.device
         dtype = x.dtype
 
-        # Initialize state if needed
+        # Initialize state if needed, or reinitialize if batch size changed
         if state is None:
             M, S, context_buffer = self.init_state(batch_size, device, dtype)
         else:
             M, S, context_buffer = state
+            # Check if batch size changed (e.g., last batch of epoch is smaller)
+            if M.shape[0] != batch_size:
+                M, S, context_buffer = self.init_state(batch_size, device, dtype)
 
         # Update memory with new information
         M_new, S_new, buffer_new, metrics = self.update(M, S, context_buffer, x)

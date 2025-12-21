@@ -14,7 +14,7 @@ echo "ATLAS-SHAKESPEARE TRAINING"
 echo "=============================================="
 echo "Model: 10M parameters (d=256, L=4)"
 echo "Corpus: Complete Works of Shakespeare (~1M tokens)"
-echo "Device: cuda:1"
+echo "Device: cuda:0"
 echo ""
 
 # Create output directories
@@ -23,7 +23,7 @@ mkdir -p runs/atlas_shakespeare/checkpoints
 # Launch training
 python scripts/train_episodic.py \
     --config configs/atlas_shakespeare.yaml \
-    --device cuda:1
+    --device cuda:0
 
 echo ""
 echo "=============================================="
