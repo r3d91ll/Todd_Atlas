@@ -13,6 +13,9 @@ checkpoints/
 data/
 datasets
 
+# Tokenizer training corpus (too large for GitHub)
+tokenizer/*/training_corpus.txt
+
 # Screenshots and images
 *.png
 *.jpg
