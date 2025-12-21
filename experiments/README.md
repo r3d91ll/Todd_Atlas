@@ -4,7 +4,7 @@ This directory contains both archived and active experiments for the Atlas proje
 
 ## Structure
 
-```
+```text
 experiments/
 ├── archived/           # Completed or discontinued experiments
 │   ├── 001_*/          # Numbered for chronological ordering

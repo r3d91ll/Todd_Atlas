@@ -67,7 +67,7 @@ The gating mechanism collapsed from 50% to <1%, causing the model to ignore the 
 
 Despite good PPL, generation was incoherent:
 
-```
+```text
 Prompt: "The capital of France is"
 Output: "The capital of France is a man, and the story, and the same to
          the world, and the same, and the other, and the story..."

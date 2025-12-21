@@ -20,7 +20,7 @@ This implementation followed the Titans paper closely:
 
 ### Key Components
 
-```
+```text
 titans_atlas/
 ├── layers/
 │   ├── memory.py       # DeepMemory with polynomial features
