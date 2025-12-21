@@ -139,7 +139,7 @@ data:
   pin_memory: true
 
   # Tokenization
-  tokenizer: "gpt2"  # Or path to custom tokenizer
+  tokenizer: "t5-base"  # Must match vocab_size (32100 = T5-base)
   max_seq_len: 4096
 
 # Success criteria for this training run

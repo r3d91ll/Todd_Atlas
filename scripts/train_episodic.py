@@ -164,6 +164,7 @@ def create_dataloader(config: dict) -> DataLoader:
                 dataset_path=dataset_path,
                 batch_size=training_cfg.get('batch_size', 16),
                 max_seq_len=data_cfg.get('max_seq_len', 2048),
+                tokenizer_name=data_cfg.get('tokenizer', 't5-base'),
             )
 
         # Check if it contains subdirectories (data root) or is a specific dataset
@@ -202,6 +203,7 @@ def create_hf_dataloader(
     dataset_path: str,
     batch_size: int,
     max_seq_len: int,
+    tokenizer_name: str = "t5-base",
 ) -> DataLoader:
     """Create dataloader from HuggingFace dataset saved to disk."""
     from datasets import load_from_disk
@@ -211,8 +213,8 @@ def create_hf_dataloader(
     dataset = load_from_disk(dataset_path)
     print(f"Loaded HF dataset with {len(dataset)} examples")
 
-    # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained("t5-base")
+    # Load tokenizer from config
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
     class HFDataset(torch.utils.data.Dataset):
         def __init__(self, hf_dataset, tokenizer, max_len):
