@@ -44,7 +44,12 @@ class FrequencyAblator:
 
     Computes excluded_loss and restricted_loss by manipulating the frequency
     content of model embeddings.
+
+    Note: Expected model output is either a tensor of logits or an object with
+    a `.logits` attribute (e.g., HuggingFace model outputs).
     """
+
+    VALID_MODES = {"exclude", "restrict"}
 
     def __init__(self, config: FrequencyAblationConfig):
         self.config = config
@@ -81,10 +86,14 @@ class FrequencyAblator:
             return 0.0, 0.0
 
         original_weight = embedding_layer.weight.data.clone()
+        was_training = model.training
 
         try:
             # 1. Identify key frequencies via FFT
             key_freq_indices = self._identify_key_frequencies(original_weight)
+
+            # Set model to eval mode for consistent forward passes
+            model.eval()
 
             # 2. Compute excluded loss (key frequencies zeroed out)
             excluded_weight = self._ablate_frequencies(
@@ -116,23 +125,32 @@ class FrequencyAblator:
 
             return excluded_loss, restricted_loss
 
+        except (RuntimeError, ValueError) as e:
+            logger.warning(f"Frequency ablation failed: {type(e).__name__}: {e}")
+            return 0.0, 0.0
         except Exception as e:
-            logger.debug(f"Frequency ablation failed: {type(e).__name__}: {e}")
+            logger.warning(
+                f"Unexpected error in frequency ablation: {type(e).__name__}: {e}",
+                exc_info=True
+            )
             return 0.0, 0.0
 
         finally:
-            # Always restore original weights
+            # Always restore original weights and training state
             embedding_layer.weight.data = original_weight
+            if was_training:
+                model.train()
 
     def _get_embedding_layer(self, model: nn.Module) -> Optional[nn.Embedding]:
-        """Extract the token embedding layer from model."""
+        """Extract the token embedding layer from model.
+
+        Only returns nn.Embedding instances to ensure correct layer type.
+        """
         # Try common attribute names
         for attr in ["embed_tokens", "token_embedding", "wte", "embedding"]:
             if hasattr(model, attr):
                 layer = getattr(model, attr)
                 if isinstance(layer, nn.Embedding):
-                    return layer
-                if hasattr(layer, "weight") and isinstance(layer.weight, torch.Tensor):
                     return layer
 
         # Try nested in transformer
@@ -154,6 +172,16 @@ class FrequencyAblator:
             Array of frequency indices to ablate
         """
         weight_np = weight.detach().cpu().numpy()
+        vocab_size = weight_np.shape[0]
+
+        # Validate top_k against vocab size
+        effective_top_k = self.config.top_k
+        if vocab_size <= self.config.top_k:
+            logger.warning(
+                f"vocab_size ({vocab_size}) <= top_k ({self.config.top_k}), "
+                f"using vocab_size - 1 = {vocab_size - 1} frequencies"
+            )
+            effective_top_k = max(1, vocab_size - 1)
 
         # Apply FFT along vocab dimension
         fft_coeffs = np.fft.fft(weight_np, axis=0)
@@ -165,7 +193,7 @@ class FrequencyAblator:
         magnitudes[0] = 0
 
         # Get top-k frequency indices by magnitude
-        key_indices = np.argsort(magnitudes)[-self.config.top_k:]
+        key_indices = np.argsort(magnitudes)[-effective_top_k:]
 
         self._cached_key_freqs = key_indices
         return key_indices
@@ -202,7 +230,7 @@ class FrequencyAblator:
             ablated_fft[0] = fft_coeffs[0]  # Keep DC
             ablated_fft[freq_indices] = fft_coeffs[freq_indices]
         else:
-            raise ValueError(f"Unknown mode: {mode}")
+            raise ValueError(f"Unknown mode '{mode}', expected one of {self.VALID_MODES}")
 
         # Inverse FFT to get ablated weights
         ablated_weight = np.fft.ifft(ablated_fft, axis=0).real

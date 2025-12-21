@@ -8,23 +8,26 @@ Implements the episodic training loop:
 Combined with phase-based gate floor scheduling to prevent collapse.
 """
 
+import logging
+import math
 import os
 import time
-import math
-from enum import Enum
-from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.utils.data import DataLoader
 
 from ..model.attention import GateMode
 from .retrieval_verifier import RetrievalVerifier
+
+logger = logging.getLogger(__name__)
 
 # Import alert system (optional)
 try:
@@ -258,12 +261,14 @@ class EpisodicDDPTrainer:
         # Grokking detection (optional)
         self.grokking_detector = None
         self._last_grokking_metrics = None
+        self._grokking_criterion = None
         if GROKKING_AVAILABLE and config.grokking_enabled:
             grok_config = GrokkingConfig(
                 enabled=True,
                 metrics_interval=config.grokking_interval,
             )
             self.grokking_detector = GrokkingDetector(grok_config)
+            self._grokking_criterion = nn.CrossEntropyLoss(ignore_index=-100)
             print(f"Grokking detection enabled (interval: {config.grokking_interval} steps)")
 
         # Dynamic weight decay scheduler (optional, requires grokking detection)
@@ -621,11 +626,10 @@ class EpisodicDDPTrainer:
                 # Prepare batch data for frequency ablation
                 input_ids = None
                 labels = None
-                criterion = None
+                criterion = self._grokking_criterion
                 if self._last_episode_batch is not None:
                     input_ids = self._last_episode_batch.get('input_ids', self._last_episode_batch.get('inputs'))
                     labels = self._last_episode_batch.get('labels', input_ids)
-                    criterion = nn.CrossEntropyLoss(ignore_index=-100)
 
                 grok_metrics = self.grokking_detector.compute_metrics(
                     model=model,
@@ -650,8 +654,7 @@ class EpisodicDDPTrainer:
                         metrics.update(self.weight_decay_scheduler.get_stats())
                     else:
                         # Frequency ablation returned 0 - likely disabled or failed
-                        import logging
-                        logging.getLogger(__name__).debug(
+                        logger.debug(
                             "Weight decay scheduler skipped: excluded_loss is 0 "
                             "(frequency ablation may be disabled or failed)"
                         )
