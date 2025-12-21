@@ -2,4 +2,4 @@
 
 from .alert_system import AlertSystem, TelegramNotifier, TelegramConfig
 
-__all__ = ['AlertSystem', 'TelegramNotifier', 'TelegramConfig']
+__all__ = ['AlertSystem', 'TelegramConfig', 'TelegramNotifier']

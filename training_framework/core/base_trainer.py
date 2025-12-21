@@ -331,7 +331,7 @@ class BaseTrainer(ABC):
 
             # Checkpoint
             if self.global_step % self.config.save_interval == 0:
-                checkpoint_path = self.save_checkpoint()
+                self.save_checkpoint()
                 if self.alert_system:
                     gate_mean = step_metrics.get('gate_mean', 0.0)
                     self.alert_system.send_checkpoint(

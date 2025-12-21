@@ -6,6 +6,7 @@ Supports both real-time streaming and batch analysis.
 """
 
 import json
+import statistics
 import time
 import threading
 from pathlib import Path
@@ -57,6 +58,9 @@ class MetricCollector:
         Args:
             metrics: Dictionary of metric name -> value
         """
+        # Copy to avoid mutating caller's dict
+        metrics = metrics.copy()
+
         # Add timestamp if not present
         if 'timestamp' not in metrics:
             metrics['timestamp'] = time.time()
@@ -101,7 +105,6 @@ class MetricCollector:
             if not values:
                 return None
 
-            import statistics
             return {
                 'mean': statistics.mean(values),
                 'std': statistics.stdev(values) if len(values) > 1 else 0.0,
@@ -202,8 +205,6 @@ class MetricAggregator:
         Args:
             method: 'mean', 'sum', 'max', or 'min'
         """
-        import statistics
-
         result = {}
         for key, values in self._aggregated.items():
             if not values:

@@ -317,7 +317,7 @@ def page_alerts_health(df: pd.DataFrame, latest: Dict[str, Any]):
         elif ret_acc >= 0.9:
             checks.append(("✅ EXCELLENT", f"Retrieval accuracy: {ret_acc:.1%}", "green"))
         else:
-            checks.append(("ℹ️ INFO", f"Retrieval accuracy: {ret_acc:.1%}", "blue"))
+            checks.append(("INFO", f"Retrieval accuracy: {ret_acc:.1%}", "blue"))
 
     # Loss stability
     if 'loss' in df.columns and len(df) > 100:
@@ -441,7 +441,7 @@ monitoring:
     st.subheader("Grokking Metrics Over Time")
 
     # Prepare data
-    grok_df = df[['step'] + grokking_cols].dropna()
+    grok_df = df[['step', *grokking_cols]].dropna()
 
     if not grok_df.empty:
         # Create subplot figure
@@ -589,15 +589,8 @@ def main():
     parser.add_argument('--refresh-interval', type=int, default=30,
                         help='Auto-refresh interval in seconds')
 
-    # Streamlit handles args differently
-    try:
-        args = parser.parse_args()
-    except SystemExit:
-        args = argparse.Namespace(
-            metrics_path='runs/experiment/metrics_stream.jsonl',
-            max_steps=100000,
-            refresh_interval=30
-        )
+    # Use parse_known_args to handle Streamlit's extra arguments
+    args, _ = parser.parse_known_args()
 
     # Sidebar
     st.sidebar.title("Atlas Training Monitor")

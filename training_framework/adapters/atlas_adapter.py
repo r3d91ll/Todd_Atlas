@@ -5,6 +5,7 @@ This is the ONLY file that changes between experiments.
 Implements comprehensive memory observability for gate collapse detection.
 """
 
+import logging
 import math
 import torch
 import torch.nn as nn
@@ -12,6 +13,8 @@ from typing import Dict, Any, Tuple, List, Optional
 from collections import deque
 
 from .base_adapter import MetricsAdapter
+
+logger = logging.getLogger(__name__)
 
 
 class AtlasMetricsAdapter(MetricsAdapter):
@@ -314,7 +317,7 @@ class AtlasMetricsAdapter(MetricsAdapter):
                 M = M.view(M.size(0), -1)
 
             # SVD
-            U, S, V = torch.svd(M.float())
+            _, S, _ = torch.svd(M.float())
 
             # Normalize singular values
             S_norm = S / (S.sum() + 1e-10)
@@ -324,7 +327,8 @@ class AtlasMetricsAdapter(MetricsAdapter):
 
             # Effective rank
             return math.exp(entropy)
-        except Exception:
+        except (RuntimeError, ValueError) as e:
+            logger.debug(f"Effective rank computation failed: {e}")
             return 0.0
 
     def _compute_matrix_entropy(self, M: torch.Tensor) -> float:
@@ -345,7 +349,8 @@ class AtlasMetricsAdapter(MetricsAdapter):
             entropy = -(hist * torch.log(hist + 1e-10)).sum().item()
 
             return entropy
-        except Exception:
+        except (RuntimeError, ValueError) as e:
+            logger.debug(f"Matrix entropy computation failed: {e}")
             return 0.0
 
     def _std(self, values: List[float]) -> float:

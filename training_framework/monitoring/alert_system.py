@@ -7,6 +7,7 @@ Provides real-time alerts for training anomalies, checkpoints, and completion.
 import time
 import logging
 import requests
+from collections import deque
 from typing import Dict, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from enum import Enum
@@ -156,8 +157,8 @@ class AlertSystem:
         # Cooldown tracking: metric_name -> last_alert_time
         self._cooldowns: Dict[str, float] = {}
 
-        # Alert history for dashboard
-        self._alert_history: list = []
+        # Alert history for dashboard (bounded to prevent unbounded growth)
+        self._alert_history: deque = deque(maxlen=1000)
 
         # Default cooldown
         self._default_cooldown = telegram_config.cooldown_seconds if telegram_config else 300
@@ -262,7 +263,8 @@ class AlertSystem:
 
     def get_alert_history(self, limit: int = 100) -> list:
         """Get recent alert history."""
-        return self._alert_history[-limit:]
+        history_list = list(self._alert_history)
+        return history_list[-limit:]
 
     def clear_history(self) -> None:
         """Clear alert history."""

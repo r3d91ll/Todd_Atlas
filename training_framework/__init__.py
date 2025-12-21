@@ -17,12 +17,12 @@ from .core.base_trainer import BaseTrainer, TrainerConfig
 from .monitoring.alert_system import AlertSystem, TelegramNotifier, TelegramConfig
 
 __all__ = [
-    'MetricCollector',
-    'BaseTrainer',
-    'TrainerConfig',
     'AlertSystem',
-    'TelegramNotifier',
+    'BaseTrainer',
+    'MetricCollector',
     'TelegramConfig',
+    'TelegramNotifier',
+    'TrainerConfig',
 ]
 
 __version__ = '0.1.0'
