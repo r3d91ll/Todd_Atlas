@@ -432,6 +432,9 @@ class AtlasOmega(nn.Module):
         for block in self.blocks:
             if hasattr(block.memory, 'get_state'):
                 states.append(block.memory.get_state())
+            elif hasattr(block, '_last_memory_state') and block._last_memory_state is not None:
+                # Use cached state from last forward pass
+                states.append(block._last_memory_state)
             elif hasattr(block.memory, '_M'):
                 # Fallback: collect raw tensors
                 M = getattr(block.memory, '_M', None)

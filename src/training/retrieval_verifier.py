@@ -41,16 +41,19 @@ class RetrievalVerifier:
         self,
         max_buffer_size: int = 100,
         retrieval_loss_weight: float = 5.0,
+        success_threshold: float = 0.5,
         device: str = 'cuda',
     ):
         """
         Args:
             max_buffer_size: Maximum number of storage records to keep
             retrieval_loss_weight: Weight for retrieval loss (heavy penalty)
+            success_threshold: Minimum token accuracy to count as successful retrieval
             device: Device for tensor operations
         """
         self.max_buffer_size = max_buffer_size
         self.retrieval_loss_weight = retrieval_loss_weight
+        self.success_threshold = success_threshold
         self.device = device
 
         # Storage buffer: batch_hash -> StorageRecord
@@ -176,7 +179,7 @@ class RetrievalVerifier:
         ).item()
 
         # Track successful retrievals
-        if token_accuracy > 0.5:
+        if token_accuracy > self.success_threshold:
             self._successful_retrievals += 1
 
         return {
@@ -242,9 +245,9 @@ class RetrievalVerifier:
         loss = self.compute_retrieval_loss(model_logits, stored_targets)
 
         # Also compute verification metrics
-        # (Use dummy memory state since we don't have access here)
-        dummy_memory = stored.memory_snapshot.to(model_logits.device)
-        metrics = self.verify_retrieval(batch_hash, model_logits, dummy_memory)
+        # Use stored memory snapshot for similarity comparison
+        stored_memory = stored.memory_snapshot.to(model_logits.device)
+        metrics = self.verify_retrieval(batch_hash, model_logits, stored_memory)
 
         return loss, metrics
 

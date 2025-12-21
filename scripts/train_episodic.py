@@ -110,7 +110,7 @@ def create_model_from_config(config: dict) -> AtlasOmega:
     return AtlasOmega(atlas_config)
 
 
-def create_dataloader(config: dict, tokenizer=None) -> DataLoader:
+def create_dataloader(config: dict) -> DataLoader:
     """Create training dataloader."""
     data_cfg = config.get('data', {})
     training_cfg = config.get('training', {})
@@ -347,15 +347,16 @@ def main():
     print(f"Loading config: {args.config}")
     config = load_config(args.config)
 
-    # Apply command-line overrides
-    if args.device:
-        config.setdefault('training', {})['device'] = args.device
-        print(f"Device override: {args.device}")
-
-    # Also check CUDA_DEVICE environment variable
+    # Apply overrides: config file < env var < CLI argument
+    # Check CUDA_DEVICE environment variable first (lower priority)
     if os.environ.get('CUDA_DEVICE'):
         config.setdefault('training', {})['device'] = os.environ['CUDA_DEVICE']
         print(f"Device from env CUDA_DEVICE: {os.environ['CUDA_DEVICE']}")
+
+    # CLI argument has highest priority
+    if args.device:
+        config.setdefault('training', {})['device'] = args.device
+        print(f"Device override from CLI: {args.device}")
 
     # Test alert mode
     if args.test_alert:

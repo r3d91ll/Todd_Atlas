@@ -347,7 +347,7 @@ class EpisodicDDPTrainer:
         labels = batch.get('labels', input_ids)
 
         with torch.autocast(device_type='cuda', dtype=self.dtype):
-            logits, self.memory_states, block_metrics = self.model(
+            logits, self.memory_states, _ = self.model(
                 input_ids,
                 memory_states=self.memory_states,
                 return_metrics=True,
@@ -396,7 +396,7 @@ class EpisodicDDPTrainer:
         labels = batch.get('labels', input_ids)
 
         with torch.autocast(device_type='cuda', dtype=self.dtype):
-            logits, self.memory_states, block_metrics = self.model(
+            logits, self.memory_states, _ = self.model(
                 input_ids,
                 memory_states=self.memory_states,
                 return_metrics=True,
@@ -413,7 +413,6 @@ class EpisodicDDPTrainer:
 
         # Compute retrieval loss and verification
         batch_hash = self._compute_batch_hash(batch)
-        current_memory = self._get_memory_state_snapshot()
 
         retrieval_loss, verification_metrics = self.retrieval_verifier.compute_retrieval_loss_from_hash(
             batch_hash=batch_hash,
@@ -483,7 +482,7 @@ class EpisodicDDPTrainer:
 
             # Optimizer step every gradient_accumulation_steps
             if self.episode_step % self.config.gradient_accumulation_steps == 0:
-                opt_metrics = self._optimizer_step()
+                self._optimizer_step()
                 self.global_step += 1
                 self._update_training_phase()
                 self._set_lr(self._get_lr())
@@ -505,7 +504,7 @@ class EpisodicDDPTrainer:
 
             # Optimizer step every gradient_accumulation_steps
             if self.episode_step % self.config.gradient_accumulation_steps == 0:
-                opt_metrics = self._optimizer_step()
+                self._optimizer_step()
                 self.global_step += 1
                 self._update_training_phase()
                 self._set_lr(self._get_lr())

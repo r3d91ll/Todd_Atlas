@@ -249,7 +249,7 @@ class GatingMechanism(nn.Module):
 
         # Apply mode-specific gate constraints
         if self._mode == GateMode.STORAGE:
-            # During storage: push gate toward high value (encourage memory writes)
+            # During storage: enforce minimum gate value (encourage memory writes)
             gate = torch.max(raw_gate, torch.full_like(raw_gate, self._storage_gate_target))
         elif self._mode == GateMode.RETRIEVAL:
             # During retrieval: ensure minimum gate (encourage memory reads)
