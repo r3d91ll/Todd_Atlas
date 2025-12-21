@@ -322,8 +322,8 @@ def create_trainer_config(config: dict) -> TrainerConfig:
         compile_model=bool(training_cfg.get('compile_model', False)),
         use_ddp=bool(training_cfg.get('use_ddp', False)),
         episodic=ep_config,
-        telegram_bot_token=str(telegram_cfg.get('bot_token', '')),
-        telegram_chat_id=str(telegram_cfg.get('chat_id', '')),
+        telegram_bot_token=os.environ.get('TELEGRAM_BOT_TOKEN', str(telegram_cfg.get('bot_token', ''))),
+        telegram_chat_id=os.environ.get('TELEGRAM_CHAT_ID', str(telegram_cfg.get('chat_id', ''))),
         grokking_enabled=bool(grokking_cfg.get('enabled', False)),
         grokking_interval=int(grokking_cfg.get('metrics_interval', 500)),
     )
