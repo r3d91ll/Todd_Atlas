@@ -271,6 +271,32 @@ class OmegaMemory(nn.Module):
 
         return M, S, context_buffer
 
+    def reset_state(self) -> None:
+        """
+        Reset any cached memory state.
+
+        Note: OmegaMemory doesn't maintain persistent internal state -
+        state is passed through forward() calls. This method exists
+        for API compatibility with episodic training.
+        """
+        # OmegaMemory is stateless between forward calls
+        # (state is passed explicitly), so nothing to reset
+        pass
+
+    def get_state(self) -> Optional[Tuple[torch.Tensor, torch.Tensor, List]]:
+        """
+        Get current memory state.
+
+        Note: OmegaMemory doesn't maintain persistent internal state -
+        state is passed through forward() calls. This method exists
+        for API compatibility with episodic training.
+
+        Returns:
+            None (state is passed explicitly through forward())
+        """
+        # State is managed externally, not internally
+        return None
+
     def _compute_omega_gradient(
         self,
         M: torch.Tensor,

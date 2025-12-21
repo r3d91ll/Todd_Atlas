@@ -17,7 +17,7 @@ from typing import Optional, Tuple, Dict, List, Any
 from dataclasses import dataclass
 
 from .omega_memory import OmegaMemory, OmegaMemoryConfig
-from .attention import SlidingWindowAttention, GatingMechanism, FeedForward
+from .attention import SlidingWindowAttention, GatingMechanism, FeedForward, GateMode
 
 
 @dataclass
@@ -29,7 +29,7 @@ class AtlasOmegaConfig:
     n_layers: int = 8
     n_heads: int = 4
     d_ff: int = 2048
-    vocab_size: int = 32000
+    vocab_size: int = 32100  # T5-base: 32000 base + 100 extra_ids
     max_seq_len: int = 4096
 
     # Memory configuration (Omega rule)
@@ -151,6 +151,9 @@ class AtlasOmegaBlock(nn.Module):
             state=memory_state,
             return_metrics=return_metrics,
         )
+
+        # Cache memory state for observability (adapter access)
+        self._last_memory_state = new_memory_state
 
         # Apply dropout to memory output
         mem_out = self.memory_dropout(mem_out)
@@ -365,6 +368,146 @@ class AtlasOmega(nn.Module):
 
         return input_ids
 
+    # ===== Gate Control Methods for Episodic Training =====
+
+    def set_gate_mode(self, mode: GateMode) -> None:
+        """
+        Set gate mode for all blocks.
+
+        Args:
+            mode: GateMode.NORMAL, GateMode.STORAGE, or GateMode.RETRIEVAL
+        """
+        for block in self.blocks:
+            block.gate.set_mode(mode)
+
+    def get_gate_mode(self) -> GateMode:
+        """Get the current gate mode (from first block)."""
+        if self.blocks:
+            return self.blocks[0].gate.get_mode()
+        return GateMode.NORMAL
+
+    def set_gate_floor(self, floor: float) -> None:
+        """
+        Set minimum gate value for all blocks.
+
+        Args:
+            floor: Minimum gate value (0.0 to 1.0)
+        """
+        for block in self.blocks:
+            block.gate.set_gate_floor(floor)
+
+    def set_storage_target(self, target: float) -> None:
+        """
+        Set the target gate value during storage mode for all blocks.
+
+        Args:
+            target: Target gate value (0.0 to 1.0)
+        """
+        for block in self.blocks:
+            block.gate.set_storage_target(target)
+
+    def set_retrieval_floor(self, floor: float) -> None:
+        """
+        Set the minimum gate value during retrieval mode for all blocks.
+
+        Args:
+            floor: Minimum gate value (0.0 to 1.0)
+        """
+        for block in self.blocks:
+            block.gate.set_retrieval_floor(floor)
+
+    def reset_all_memory(self) -> None:
+        """Reset memory state in all blocks."""
+        for block in self.blocks:
+            block.memory.reset_state()
+
+    def get_memory_state(self) -> List[Tuple]:
+        """
+        Get memory state from all blocks.
+
+        Returns:
+            List of memory state tuples (M, S, context_buffer) per layer
+        """
+        states = []
+        for block in self.blocks:
+            # Prefer cached state from last forward pass (OmegaMemory.get_state() returns None)
+            if hasattr(block, '_last_memory_state') and block._last_memory_state is not None:
+                states.append(block._last_memory_state)
+            elif hasattr(block.memory, 'get_state'):
+                state = block.memory.get_state()
+                if state is not None:
+                    states.append(state)
+                elif hasattr(block.memory, '_M'):
+                    # Fallback: collect raw tensors
+                    M = getattr(block.memory, '_M', None)
+                    S = getattr(block.memory, '_S', None)
+                    states.append((M, S))
+                else:
+                    states.append(None)
+            elif hasattr(block.memory, '_M'):
+                # Fallback: collect raw tensors
+                M = getattr(block.memory, '_M', None)
+                S = getattr(block.memory, '_S', None)
+                states.append((M, S))
+            else:
+                states.append(None)
+        return states
+
+    def get_gate_metrics(self) -> Dict[str, Any]:
+        """
+        Collect gate statistics from all blocks.
+
+        Returns:
+            Dictionary with per-layer and aggregate gate metrics
+        """
+        metrics = {}
+        all_gates = []
+
+        for i, block in enumerate(self.blocks):
+            raw_gate, applied_gate = block.gate.get_last_gates()
+
+            if applied_gate is not None:
+                gate_flat = applied_gate.flatten()
+                all_gates.append(gate_flat)
+
+                metrics[f'layer_{i}/gate_mean'] = gate_flat.mean().item()
+                metrics[f'layer_{i}/gate_std'] = gate_flat.std().item()
+                metrics[f'layer_{i}/gate_min'] = gate_flat.min().item()
+                metrics[f'layer_{i}/gate_max'] = gate_flat.max().item()
+
+            if raw_gate is not None:
+                metrics[f'layer_{i}/raw_gate_mean'] = raw_gate.mean().item()
+
+        # Aggregate metrics
+        if all_gates:
+            combined = torch.cat(all_gates)
+            metrics['gate_mean'] = combined.mean().item()
+            metrics['gate_std'] = combined.std().item()
+            metrics['gate_min'] = combined.min().item()
+            metrics['gate_max'] = combined.max().item()
+            metrics['gate_dead_ratio'] = (combined < 0.01).float().mean().item()
+            metrics['gate_saturated_ratio'] = (combined > 0.99).float().mean().item()
+            metrics['gate_collapse_risk'] = 1.0 - (combined > 0.10).float().mean().item()
+
+        return metrics
+
+    def get_all_gates(self) -> Optional[torch.Tensor]:
+        """
+        Get all gate values concatenated.
+
+        Returns:
+            Tensor of all gate values flattened, or None if no gates available
+        """
+        all_gates = []
+        for block in self.blocks:
+            _, applied_gate = block.gate.get_last_gates()
+            if applied_gate is not None:
+                all_gates.append(applied_gate.flatten())
+
+        if all_gates:
+            return torch.cat(all_gates)
+        return None
+
 
 def create_atlas_omega_50m() -> AtlasOmega:
     """Create ~50M parameter Atlas model with proper Omega memory."""
@@ -373,7 +516,7 @@ def create_atlas_omega_50m() -> AtlasOmega:
         n_layers=8,
         n_heads=4,
         d_ff=2048,
-        vocab_size=32000,
+        vocab_size=32100,  # T5-base: 32000 base + 100 extra_ids
         max_seq_len=4096,
         d_key=512,
         d_value=512,
@@ -396,10 +539,70 @@ def create_atlas_omega_100m() -> AtlasOmega:
         n_layers=12,
         n_heads=6,
         d_ff=3072,
-        vocab_size=32000,
+        vocab_size=32100,  # T5-base: 32000 base + 100 extra_ids
         max_seq_len=4096,
         d_key=768,
         d_value=768,
+        poly_degree=2,
+        context_window=16,
+        init_alpha=0.99,
+        init_theta=0.9,
+        init_eta=0.1,
+        window_size=512,
+        dropout=0.1,
+        chunk_size=2048,
+    )
+    return AtlasOmega(config)
+
+
+def create_atlas_omega_40m() -> AtlasOmega:
+    """
+    Create ~40M parameter Atlas model for local A6000 testing.
+
+    Purpose: Validate full pipeline before cloud deployment.
+    Expected runtime: ~2-4 hours for 5000 steps on A6000.
+    """
+    config = AtlasOmegaConfig(
+        d_model=384,
+        n_layers=8,
+        n_heads=6,
+        d_ff=1536,
+        vocab_size=32100,  # T5-base: 32000 base + 100 extra_ids
+        max_seq_len=2048,
+        d_key=384,
+        d_value=384,
+        poly_degree=2,
+        context_window=16,
+        init_alpha=0.99,
+        init_theta=0.9,
+        init_eta=0.1,
+        window_size=256,
+        dropout=0.1,
+        chunk_size=1024,
+    )
+    return AtlasOmega(config)
+
+
+def create_atlas_omega_389m() -> AtlasOmega:
+    """
+    Create ~389M parameter Atlas model for episodic memory training.
+
+    Chinchilla-optimal configuration:
+    - 389M parameters
+    - ~15B tokens (40 tokens/param)
+    - ~57K training steps
+
+    Designed for episodic training with gate collapse prevention.
+    """
+    config = AtlasOmegaConfig(
+        d_model=1024,
+        n_layers=16,
+        n_heads=8,
+        d_ff=4096,
+        vocab_size=32100,  # T5-base: 32000 base + 100 extra_ids
+        max_seq_len=4096,
+        d_key=1024,
+        d_value=1024,
         poly_degree=2,
         context_window=16,
         init_alpha=0.99,
