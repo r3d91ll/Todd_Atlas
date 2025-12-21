@@ -709,7 +709,8 @@ class EpisodicDDPTrainer:
 
     def load_checkpoint(self, path: str) -> None:
         """Load checkpoint and resume training."""
-        checkpoint = torch.load(path, map_location=self.device)
+        # weights_only=False needed for PyTorch 2.6+ (changed default)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
 
         model = self._get_raw_model()
         model.load_state_dict(checkpoint['model_state_dict'])

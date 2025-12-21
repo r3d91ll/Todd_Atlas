@@ -227,18 +227,23 @@ class GrokkingDetector:
                 # Try to get memory matrix from block
                 W = None
 
-                if hasattr(block, "memory"):
+                # Atlas Omega: memory state cached in _last_memory_state as (M, S, context_buffer)
+                if hasattr(block, "_last_memory_state") and block._last_memory_state is not None:
+                    state = block._last_memory_state
+                    if isinstance(state, tuple) and len(state) > 0:
+                        W = state[0]  # M matrix is first element
+
+                # Fallback: try other common patterns
+                if W is None and hasattr(block, "memory"):
                     memory = block.memory
-                    # Check for M matrix (Omega memory)
                     if hasattr(memory, "M"):
                         W = memory.M
                     elif hasattr(memory, "W"):
                         W = memory.W
-                    # Check for get_state method
                     elif hasattr(memory, "get_current_state"):
                         state = memory.get_current_state()
                         if isinstance(state, tuple) and len(state) > 0:
-                            W = state[0]  # Usually (M, S) tuple
+                            W = state[0]
 
                 if W is not None:
                     # Handle batched memory (take first batch)
