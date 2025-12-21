@@ -401,7 +401,7 @@ class GrokkingDetector:
             metrics["effective_dim_ratio"] = metrics["effective_dim"] / min(W.shape)
 
         except Exception:
-            pass
+            logger.debug("Failed to analyze memory matrix", exc_info=True)
 
         return metrics
 

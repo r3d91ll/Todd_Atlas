@@ -184,7 +184,7 @@ def download_shakespeare(output_dir: Path):
             total_paragraphs += len(paragraphs)
             total_chars += sum(len(p) for p in paragraphs)
 
-        except Exception as e:
+        except (requests.RequestException, IOError) as e:
             print(f"  Error downloading {name}: {e}")
 
     print("\nShakespeare corpus complete:")
@@ -213,7 +213,7 @@ def download_dumas(output_dir: Path):
             total_paragraphs += len(paragraphs)
             total_chars += sum(len(p) for p in paragraphs)
 
-        except Exception as e:
+        except (requests.RequestException, IOError) as e:
             print(f"  Error downloading {name}: {e}")
 
     print("\nDumas corpus complete:")
