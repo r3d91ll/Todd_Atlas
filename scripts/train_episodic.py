@@ -40,8 +40,32 @@ from src.training.episodic_trainer import (
 from training_framework.adapters.atlas_adapter import AtlasMetricsAdapter
 
 
+class DictDataLoader:
+    """Wrapper that converts batches to dict format with input_ids/labels keys."""
+
+    def __init__(self, dl):
+        self.dl = dl
+
+    def __iter__(self):
+        for batch in self.dl:
+            # Handle different batch formats
+            if isinstance(batch, dict):
+                yield batch
+            elif isinstance(batch, (list, tuple)) and len(batch) >= 2:
+                yield {'input_ids': batch[0], 'labels': batch[1]}
+            else:
+                yield {'input_ids': batch, 'labels': batch}
+
+    def __len__(self):
+        return len(self.dl)
+
+
 def load_config(config_path: str) -> dict:
     """Load YAML configuration."""
+    config_file = Path(config_path)
+    if not config_file.exists():
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
@@ -171,24 +195,6 @@ def create_dataloader(config: dict) -> DataLoader:
         num_workers=data_cfg.get('num_workers', 4),
     )
 
-    # Wrap to return dict format
-    class DictDataLoader:
-        def __init__(self, dl):
-            self.dl = dl
-
-        def __iter__(self):
-            for batch in self.dl:
-                # Handle different batch formats
-                if isinstance(batch, dict):
-                    yield batch
-                elif isinstance(batch, (list, tuple)) and len(batch) >= 2:
-                    yield {'input_ids': batch[0], 'labels': batch[1]}
-                else:
-                    yield {'input_ids': batch, 'labels': batch}
-
-        def __len__(self):
-            return len(self.dl)
-
     return DictDataLoader(train_loader)
 
 
@@ -258,17 +264,6 @@ def create_synthetic_dataloader(
     labels = input_ids.clone()
 
     dataset = TensorDataset(input_ids, labels)
-
-    class DictDataLoader:
-        def __init__(self, dl):
-            self.dl = dl
-
-        def __iter__(self):
-            for batch in self.dl:
-                yield {'input_ids': batch[0], 'labels': batch[1]}
-
-        def __len__(self):
-            return len(self.dl)
 
     base_loader = DataLoader(
         dataset,

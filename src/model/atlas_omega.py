@@ -29,7 +29,7 @@ class AtlasOmegaConfig:
     n_layers: int = 8
     n_heads: int = 4
     d_ff: int = 2048
-    vocab_size: int = 32000
+    vocab_size: int = 32100  # T5-base: 32000 base + 100 extra_ids
     max_seq_len: int = 4096
 
     # Memory configuration (Omega rule)
@@ -516,7 +516,7 @@ def create_atlas_omega_50m() -> AtlasOmega:
         n_layers=8,
         n_heads=4,
         d_ff=2048,
-        vocab_size=32000,
+        vocab_size=32100,  # T5-base: 32000 base + 100 extra_ids
         max_seq_len=4096,
         d_key=512,
         d_value=512,
@@ -539,7 +539,7 @@ def create_atlas_omega_100m() -> AtlasOmega:
         n_layers=12,
         n_heads=6,
         d_ff=3072,
-        vocab_size=32000,
+        vocab_size=32100,  # T5-base: 32000 base + 100 extra_ids
         max_seq_len=4096,
         d_key=768,
         d_value=768,
@@ -567,7 +567,7 @@ def create_atlas_omega_40m() -> AtlasOmega:
         n_layers=8,
         n_heads=6,
         d_ff=1536,
-        vocab_size=32000,
+        vocab_size=32100,  # T5-base: 32000 base + 100 extra_ids
         max_seq_len=2048,
         d_key=384,
         d_value=384,
@@ -599,7 +599,7 @@ def create_atlas_omega_389m() -> AtlasOmega:
         n_layers=16,
         n_heads=8,
         d_ff=4096,
-        vocab_size=32000,
+        vocab_size=32100,  # T5-base: 32000 base + 100 extra_ids
         max_seq_len=4096,
         d_key=1024,
         d_value=1024,

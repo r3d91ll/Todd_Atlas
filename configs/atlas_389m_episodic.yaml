@@ -14,7 +14,7 @@ model:
   n_layers: 16
   n_heads: 8
   d_ff: 4096
-  vocab_size: 32000
+  vocab_size: 32100  # T5-base has 32000 base + 100 extra_ids
   max_seq_len: 4096
 
   # Omega memory config
@@ -120,6 +120,9 @@ monitoring:
 
 data:
   # Training data path
+  # Fallback behavior: If this path is not found and use_synthetic is not set,
+  # the training script will use synthetic data with a warning. Set use_synthetic: true
+  # explicitly if you want synthetic data, or ensure this path exists for real data.
   dataset_path: "../datasets/raw/dolma3/dolmino_mix_100B/data/"
 
   # Categories to use (subset for faster iteration if needed)
