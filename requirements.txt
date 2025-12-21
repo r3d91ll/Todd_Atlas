@@ -1,0 +1,31 @@
+# Atlas Training Requirements
+# PyTorch with CUDA support
+torch>=2.1.0
+torchvision>=0.16.0
+
+# Transformers and tokenizers
+transformers>=4.36.0
+tokenizers>=0.15.0
+sentencepiece>=0.1.99
+datasets>=2.15.0
+
+# Data processing
+numpy>=1.24.0
+pandas>=2.0.0
+zstandard>=0.22.0
+
+# Configuration
+pyyaml>=6.0
+
+# Progress and logging
+tqdm>=4.66.0
+
+# Monitoring dashboard
+streamlit>=1.29.0
+plotly>=5.18.0
+
+# Alerts
+requests>=2.31.0
+
+# Optional: for email alerts (uncomment if needed)
+# aiosmtplib>=3.0.0
