@@ -105,7 +105,6 @@ monitoring:
     frequency_ablation:
       enabled: true
       top_k: 10               # Number of key frequencies to analyze
-      use_magnitude_ranking: true
 
   alerts:
     gate_collapse_risk:

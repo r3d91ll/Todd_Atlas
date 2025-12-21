@@ -21,7 +21,7 @@ References:
 
 import logging
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import ClassVar, Optional, Set, Tuple
 
 import numpy as np
 import torch
@@ -35,7 +35,6 @@ class FrequencyAblationConfig:
     """Configuration for frequency ablation."""
     enabled: bool = True
     top_k: int = 10  # Number of key frequencies to identify/ablate
-    use_magnitude_ranking: bool = True  # Rank by FFT magnitude (vs energy)
 
 
 class FrequencyAblator:
@@ -49,7 +48,7 @@ class FrequencyAblator:
     a `.logits` attribute (e.g., HuggingFace model outputs).
     """
 
-    VALID_MODES = {"exclude", "restrict"}
+    VALID_MODES: ClassVar[Set[str]] = {"exclude", "restrict"}
 
     def __init__(self, config: FrequencyAblationConfig):
         self.config = config
@@ -210,10 +209,14 @@ class FrequencyAblator:
         Args:
             weight: Original embedding weight [vocab_size, embed_dim]
             freq_indices: Frequency indices to ablate
-            mode: "exclude" (zero out these freqs) or "restrict" (keep only these freqs)
+            mode: "exclude" (zero out these freqs) or "restrict" (keep only these freqs plus DC)
 
         Returns:
             Ablated weight tensor
+
+        Note:
+            In "restrict" mode, the DC component (index 0) is always preserved
+            for numerical stability regardless of whether it's in freq_indices.
         """
         weight_np = weight.detach().cpu().numpy()
 
@@ -254,7 +257,6 @@ def create_frequency_ablator(config_dict: dict) -> FrequencyAblator:
     config = FrequencyAblationConfig(
         enabled=freq_config.get("enabled", True),
         top_k=freq_config.get("top_k", 10),
-        use_magnitude_ranking=freq_config.get("use_magnitude_ranking", True),
     )
 
     return FrequencyAblator(config)

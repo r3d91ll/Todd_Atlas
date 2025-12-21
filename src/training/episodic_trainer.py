@@ -9,7 +9,6 @@ Combined with phase-based gate floor scheduling to prevent collapse.
 """
 
 import logging
-import math
 import os
 import time
 from dataclasses import dataclass, field
