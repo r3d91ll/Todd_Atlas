@@ -74,11 +74,17 @@ monitoring:
   dashboard_enabled: true
   dashboard_port: 8501
 
-  # Alert thresholds
+  # Alert thresholds (nested format matches production config)
   alerts:
-    gate_collapse_risk: 0.80
-    retrieval_accuracy_floor: 0.50
-    memory_dead_ratio: 0.30
+    gate_collapse_risk:
+      threshold: 0.80
+      severity: "warning"
+    retrieval_accuracy_floor:
+      threshold: 0.50
+      severity: "warning"
+    memory_dead_ratio:
+      threshold: 0.30
+      severity: "warning"
 
   # Telegram (optional - set env vars or leave empty)
   telegram:

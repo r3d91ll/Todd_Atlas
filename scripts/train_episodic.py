@@ -76,15 +76,12 @@ def create_model_from_config(config: dict) -> AtlasOmega:
     d_model = model_cfg.get('d_model', 384)
     n_layers = model_cfg.get('n_layers', 8)
 
-    # Rough parameter estimate
-    approx_params = d_model * d_model * n_layers * 12  # Very rough
-
     # Only use factory functions for exact standard configs
     # Otherwise always use explicit config (allows custom 10M models etc)
     if d_model == 384 and n_layers == 8 and model_cfg.get('use_factory', False):
         print("Using 40M model configuration (factory)")
         return create_atlas_omega_40m()
-    elif d_model == 768 and n_layers == 12 and model_cfg.get('use_factory', False):
+    elif d_model == 1024 and n_layers == 16 and model_cfg.get('use_factory', False):
         print("Using 389M model configuration (factory)")
         return create_atlas_omega_389m()
 
@@ -156,7 +153,7 @@ def create_dataloader(config: dict) -> DataLoader:
         print("No dataset_path specified, falling back to synthetic data")
         return create_synthetic_dataloader(
             vocab_size=32000,
-            seq_len=training_cfg.get('batch_size', 2048),
+            seq_len=data_cfg.get('max_seq_len', 2048),
             batch_size=training_cfg.get('batch_size', 16),
             num_samples=10000,
         )

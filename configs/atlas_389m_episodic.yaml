@@ -110,11 +110,12 @@ monitoring:
   # Telegram notifications
   telegram:
     enabled: true
-    # Set these via environment variables:
-    # export TELEGRAM_BOT_TOKEN="your_token"
-    # export TELEGRAM_CHAT_ID="your_chat_id"
-    bot_token: "${TELEGRAM_BOT_TOKEN}"
-    chat_id: "${TELEGRAM_CHAT_ID}"
+    # REQUIRED: Set these via environment variables before training:
+    #   export TELEGRAM_BOT_TOKEN="your_token"
+    #   export TELEGRAM_CHAT_ID="your_chat_id"
+    # The script reads from os.environ with these as fallback defaults
+    bot_token: ""
+    chat_id: ""
     cooldown_minutes: 5  # Prevent alert spam
 
 data:

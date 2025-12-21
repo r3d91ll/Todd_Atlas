@@ -7,6 +7,7 @@ during storage phase and verifies retrieval during retrieval phase.
 
 import time
 import hashlib
+import warnings
 from typing import Dict, Any, Optional, Tuple
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -73,7 +74,11 @@ class RetrievalVerifier:
         """
         input_ids = batch.get('input_ids', batch.get('inputs'))
         if input_ids is None:
-            # Fallback to timestamp-based hash
+            # Fallback to timestamp-based hash - retrieval verification will fail
+            warnings.warn(
+                "Batch has no input_ids; using random hash - retrieval verification will fail",
+                stacklevel=2,
+            )
             return hashlib.md5(str(time.time()).encode()).hexdigest()[:16]
 
         # Use first few tokens as hash (efficient)
@@ -117,6 +122,7 @@ class RetrievalVerifier:
         batch_hash: str,
         model_logits: torch.Tensor,
         current_memory: torch.Tensor,
+        _increment_counter: bool = True,
     ) -> Dict[str, float]:
         """
         Verify retrieval from stored content.
@@ -125,11 +131,13 @@ class RetrievalVerifier:
             batch_hash: Batch identifier (must match a storage record)
             model_logits: Model output logits [batch, seq, vocab]
             current_memory: Current memory state
+            _increment_counter: Internal flag to control counter updates
 
         Returns:
             Dictionary of retrieval metrics
         """
-        self._total_retrieval_calls += 1
+        if _increment_counter:
+            self._total_retrieval_calls += 1
 
         stored = self._storage_buffer.get(batch_hash)
         if stored is None:
@@ -205,9 +213,6 @@ class RetrievalVerifier:
         Returns:
             Weighted cross-entropy loss
         """
-        # Flatten for cross entropy
-        logits_flat = model_logits.view(-1, model_logits.size(-1))
-
         # Ensure targets match logits sequence length
         min_len = min(model_logits.size(1), stored_targets.size(-1))
         targets_flat = stored_targets[..., :min_len].contiguous().view(-1)
@@ -244,10 +249,12 @@ class RetrievalVerifier:
         stored_targets = stored.targets.to(model_logits.device)
         loss = self.compute_retrieval_loss(model_logits, stored_targets)
 
-        # Also compute verification metrics
+        # Also compute verification metrics (don't double-count retrieval calls)
         # Use stored memory snapshot for similarity comparison
         stored_memory = stored.memory_snapshot.to(model_logits.device)
-        metrics = self.verify_retrieval(batch_hash, model_logits, stored_memory)
+        metrics = self.verify_retrieval(
+            batch_hash, model_logits, stored_memory, _increment_counter=False
+        )
 
         return loss, metrics
 
