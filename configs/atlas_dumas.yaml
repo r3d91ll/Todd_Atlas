@@ -1,0 +1,136 @@
+# Atlas-Dumas Configuration
+# Purpose: 10M parameter Atlas model trained on Dumas corpus (French)
+# Goal: Validate Atlas training + enable cross-linguistic Kakeya comparison
+#
+# Same Miras framework choices as larger Atlas models:
+# - Matrix-valued memory (W)
+# - L2 attentional bias
+# - Local + Global retention gates
+# - Momentum-based learning
+#
+# Expected training time: 1-2 hours on A6000
+
+model:
+  # Scaled down dimensions (~10M params)
+  d_model: 256
+  n_layers: 4
+  n_heads: 4
+  d_ff: 1024
+  vocab_size: 32000
+  max_seq_len: 512  # Shorter for smaller corpus
+
+  # Omega memory config (scaled to d_model)
+  d_key: 256
+  d_value: 256
+  poly_degree: 2
+  context_window: 16
+  init_alpha: 0.99
+  init_theta: 0.9
+  init_eta: 0.1
+  window_size: 128
+
+training:
+  max_steps: 10000      # Dumas corpus is larger, may need more steps
+  learning_rate: 3e-4
+  weight_decay: 0.1
+  warmup_steps: 500
+  grad_clip: 1.0
+
+  batch_size: 32
+  gradient_accumulation_steps: 2
+  # Effective batch size: 64
+
+  log_interval: 50
+  checkpoint_interval: 1000
+  metrics_path: "runs/atlas_dumas/metrics_stream.jsonl"
+  checkpoint_dir: "runs/atlas_dumas/checkpoints"
+
+  device: "cuda:1"      # Use A6000 (cuda:0 has other processes)
+  dtype: "bfloat16"
+  compile_model: false
+
+episodic:
+  enabled: true
+  storage_samples: 5
+  retrieval_samples: 5
+
+  # Phase transitions
+  phase1_steps: 3000     # High floor: steps 0-3000
+  phase2_steps: 4000     # Medium floor: steps 3000-7000
+  phase1_gate_floor: 0.30
+  phase2_gate_floor: 0.10
+  phase3_gate_floor: 0.05
+
+  storage_gate_target: 0.80
+  retrieval_gate_floor: 0.30
+
+  retrieval_loss_weight: 5.0
+  storage_loss_weight: 1.0
+
+  reset_memory_between_episodes: false
+
+monitoring:
+  dashboard_enabled: true
+  dashboard_port: 8502  # Different port to run alongside Shakespeare
+
+  # Grokking detection metrics
+  grokking:
+    enabled: true
+    metrics_interval: 500        # Compute every N steps
+    track_embeddings: true       # Analyze input embeddings
+    track_memory_matrices: true  # Analyze memory W matrices
+    track_hidden_states: true    # Analyze layer outputs
+
+    # Thresholds for grokking detection
+    fourier_concentration_target: 0.5   # Higher = more structured
+    circular_fit_target: 0.8            # Higher = more circular
+    effective_dim_ratio_target: 0.3     # Lower = more compressed
+
+  alerts:
+    gate_collapse_risk:
+      threshold: 0.80
+      severity: "critical"
+    gate_dead_ratio:
+      threshold: 0.30
+      severity: "warning"
+    retrieval_token_accuracy:
+      threshold: 0.50
+      severity: "warning"
+      direction: "below"
+    memory_sparsity:
+      threshold: 0.50
+      severity: "warning"
+
+  telegram:
+    enabled: false  # Disable for local training
+
+data:
+  dataset_path: "data/dumas"
+  num_workers: 2
+  max_seq_len: 512
+
+# Kakeya extraction settings (for post-training analysis)
+kakeya:
+  # Target concepts for geometric signature extraction (French)
+  concepts:
+    - "honneur"      # honor
+    - "amour"        # love
+    - "devoir"       # duty
+    - "mort"         # death
+    - "roi"          # king
+    - "trahison"     # betrayal
+    - "courage"      # courage (same in French)
+    - "vengeance"    # revenge
+    - "destin"       # fate
+    - "sang"         # blood
+
+  # Extraction parameters
+  extraction:
+    # Layer indices to extract from (0-indexed)
+    layers: [0, 1, 2, 3]
+    # Extract from memory matrices
+    extract_memory: true
+    # Extract from hidden states
+    extract_hidden: true
+    # Extract from attention patterns
+    extract_attention: true
