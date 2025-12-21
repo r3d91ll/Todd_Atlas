@@ -569,21 +569,25 @@ class EpisodicDDPTrainer:
                 val_metrics = {
                     'retrieval_accuracy': episode_metrics.get('retrieval_accuracy_mean', 0),
                 }
+                # Pass gate_mean for Atlas-specific gate health check
+                current_gate_mean = metrics.get('gate_mean', 1.0)
                 grok_metrics = self.grokking_detector.compute_metrics(
                     model=model,
                     step=self.global_step,
                     val_metrics=val_metrics,
+                    gate_mean=current_gate_mean,
                 )
                 self._last_grokking_metrics = grok_metrics
                 metrics.update(grok_metrics.to_dict())
 
-                # Log grokking phase
+                # Log grokking phase with gate health
                 if self.global_step % self.config.log_interval == 0:
+                    gate_status = "✓" if grok_metrics.gate_healthy else "⚠ COLLAPSED"
                     print(
                         f"  [Grokking] Phase: {grok_metrics.phase} | "
+                        f"Gate: {current_gate_mean:.1%} {gate_status} | "
                         f"Fourier: {grok_metrics.embedding_fourier_concentration:.3f} | "
-                        f"Circular: {grok_metrics.embedding_circular_fit:.3f} | "
-                        f"EffDim: {grok_metrics.embedding_effective_dim_ratio:.1%}"
+                        f"Circular: {grok_metrics.embedding_circular_fit:.3f}"
                     )
             elif self._last_grokking_metrics is not None:
                 # Include last computed grokking phase in metrics
@@ -741,6 +745,25 @@ class EpisodicDDPTrainer:
             # Collect and log metrics
             metrics = self._collect_metrics(episode_metrics)
             self._log_metrics(metrics)
+
+            # Early stopping on grokking (Atlas-aware)
+            if self._last_grokking_metrics is not None:
+                phase = self._last_grokking_metrics.phase
+                if phase == "grokked":
+                    print(f"\n🎯 GROKKING ACHIEVED at step {self.global_step}!")
+                    print(f"   Gate mean: {self._last_grokking_metrics.gate_mean:.1%} (healthy)")
+                    print(f"   Fourier concentration: {self._last_grokking_metrics.embedding_fourier_concentration:.3f}")
+                    print(f"   Circular fit: {self._last_grokking_metrics.embedding_circular_fit:.3f}")
+                    print(f"   Effective dim ratio: {self._last_grokking_metrics.embedding_effective_dim_ratio:.1%}")
+                    self._flush_metrics()
+                    self._save_checkpoint(is_best=True)
+                    break
+                elif phase == "gate_collapse":
+                    # Log warning but continue training - gates may recover
+                    if self.global_step % (self.config.log_interval * 10) == 0:
+                        print(f"\n⚠️  GATE COLLAPSE detected at step {self.global_step}")
+                        print(f"   Gate mean: {self._last_grokking_metrics.gate_mean:.1%} (below threshold)")
+                        print("   Memory may be bypassed - consider adjusting gate_floor or memory learning rate")
 
             # Track best retrieval accuracy
             ret_acc = metrics.get('retrieval_accuracy_mean', 0)

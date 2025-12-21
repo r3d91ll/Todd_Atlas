@@ -39,6 +39,10 @@ class GrokkingConfig:
     circular_fit_target: float = 0.8
     effective_dim_ratio_target: float = 0.3
 
+    # Atlas-specific thresholds
+    min_gate_mean: float = 0.1  # Gate collapse threshold - below this = memory bypassed
+    min_retrieval_accuracy: float = 0.5  # Lower for language models (not classification)
+
     # Trend detection window
     trend_window: int = 10  # Number of measurements for trend
 
@@ -68,6 +72,10 @@ class GrokkingMetrics:
     hidden_effective_dim: float = 0.0
     hidden_entropy: float = 0.0
 
+    # Atlas-specific metrics
+    gate_mean: float = 0.0  # Average gate value - low = memory bypassed
+    gate_healthy: bool = True  # True if gate_mean > threshold
+
     # Grokking phase detection
     phase: str = "unknown"  # memorization, circuit_formation, cleanup, grokked
 
@@ -86,6 +94,8 @@ class GrokkingMetrics:
             "grokking/memory_rank": self.memory_rank,
             "grokking/hidden_effective_dim": self.hidden_effective_dim,
             "grokking/hidden_entropy": self.hidden_entropy,
+            "grokking/gate_mean": self.gate_mean,
+            "grokking/gate_healthy": self.gate_healthy,
             "grokking/phase": self.phase,
         }
 
@@ -117,6 +127,7 @@ class GrokkingDetector:
         step: int,
         train_metrics: Optional[Dict] = None,
         val_metrics: Optional[Dict] = None,
+        gate_mean: float = 1.0,
     ) -> GrokkingMetrics:
         """
         Compute all grokking-related metrics.
@@ -126,11 +137,16 @@ class GrokkingDetector:
             step: Current training step
             train_metrics: Optional dict with train_loss, train_accuracy
             val_metrics: Optional dict with val_loss, val_accuracy, retrieval_accuracy
+            gate_mean: Average gate value from training (Atlas-specific)
 
         Returns:
             GrokkingMetrics with all computed values
         """
         metrics = GrokkingMetrics(step=step)
+
+        # Atlas-specific: Gate health check
+        metrics.gate_mean = gate_mean
+        metrics.gate_healthy = gate_mean >= self.config.min_gate_mean
 
         with torch.no_grad():
             # 1. Embedding metrics
@@ -411,11 +427,15 @@ class GrokkingDetector:
         """
         Detect current grokking phase based on metrics and trends.
 
+        Atlas-Specific Phase Detection:
+        - Requires healthy gate values (gate_mean > min_gate_mean)
+        - Uses lower retrieval threshold for language modeling
+
         Phases:
         - memorization: High train acc, low val/retrieval acc, low structure
         - circuit_formation: Structure metrics increasing
         - cleanup: Val/retrieval acc jumping up
-        - grokked: Stable high performance + stable structure
+        - grokked: Stable high performance + stable structure + healthy gates
         """
         if len(self.history) < self.config.trend_window:
             return "insufficient_data"
@@ -436,14 +456,23 @@ class GrokkingDetector:
         structure_improving = (fourier_trend > 0.001 or circular_trend > 0.001)
         structure_stable = abs(fourier_trend) < 0.0001 and abs(circular_trend) < 0.0001
 
-        high_retrieval = retrieval_acc > 0.7
+        # Atlas-specific: Check gate health
+        gate_healthy = metrics.gate_healthy
+
+        # Use configurable thresholds
+        high_retrieval = retrieval_acc > self.config.min_retrieval_accuracy
         high_structure = (
             metrics.embedding_fourier_concentration > self.config.fourier_concentration_target and
             metrics.embedding_circular_fit > self.config.circular_fit_target
         )
 
-        if high_retrieval and high_structure and structure_stable:
+        # ATLAS REQUIREMENT: Must have healthy gates to be considered "grokked"
+        # If gates collapsed, memory is bypassed and model hasn't truly grokked
+        if high_retrieval and high_structure and structure_stable and gate_healthy:
             return "grokked"
+        elif not gate_healthy:
+            # Gate collapse - model is bypassing memory, stuck in attention-only mode
+            return "gate_collapse"
         elif high_retrieval or structure_improving:
             return "cleanup"
         elif structure_improving:

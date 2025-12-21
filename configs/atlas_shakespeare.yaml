@@ -30,7 +30,7 @@ model:
   window_size: 128
 
 training:
-  max_steps: 10000      # More steps for smaller corpus
+  max_steps: 100000     # Safety limit - training stops on grokking detection
   learning_rate: 3e-4
   weight_decay: 0.1
   warmup_steps: 500
