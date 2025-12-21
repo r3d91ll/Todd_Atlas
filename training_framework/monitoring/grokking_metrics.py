@@ -29,7 +29,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any, Callable
+from typing import Any, Dict, List, Optional, Tuple
 from collections import deque
 
 from .frequency_ablation import FrequencyAblator, FrequencyAblationConfig
@@ -487,11 +487,23 @@ class GrokkingDetector:
 
         recent = list(self.history)[-self.config.trend_window:]
 
+        # Check if we have valid excluded_loss data
+        has_excluded_data = (
+            self.config.frequency_ablation.enabled
+            and len(self.excluded_loss_history) >= self.config.trend_window
+        )
+
         # PRIMARY: excluded_loss trend (most reliable grokking indicator)
         excluded_trend = metrics.excluded_loss_trend
-        excluded_rising = excluded_trend > self.config.excluded_loss_rising_threshold
-        excluded_falling = excluded_trend < self.config.excluded_loss_falling_threshold
-        excluded_stable = not excluded_rising and not excluded_falling
+        if has_excluded_data:
+            excluded_rising = excluded_trend > self.config.excluded_loss_rising_threshold
+            excluded_falling = excluded_trend < self.config.excluded_loss_falling_threshold
+            excluded_stable = not excluded_rising and not excluded_falling
+        else:
+            # Fall back to secondary signals when excluded_loss unavailable
+            excluded_rising = False
+            excluded_falling = False
+            excluded_stable = True
 
         # SECONDARY: geometric structure trends
         fourier_trend = self._compute_trend([m.embedding_fourier_concentration for m in recent])

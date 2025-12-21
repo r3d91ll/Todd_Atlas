@@ -117,7 +117,7 @@ class FrequencyAblator:
             return excluded_loss, restricted_loss
 
         except Exception as e:
-            logger.debug(f"Frequency ablation failed: {e}")
+            logger.debug(f"Frequency ablation failed: {type(e).__name__}: {e}")
             return 0.0, 0.0
 
         finally:

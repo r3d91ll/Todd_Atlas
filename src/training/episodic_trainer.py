@@ -138,9 +138,12 @@ class TrainerConfig:
     # Dynamic weight decay (optional, requires grokking detection)
     dynamic_weight_decay_enabled: bool = False
     dynamic_weight_decay_initial: float = 1.0
+    dynamic_weight_decay_min: float = 0.1
     dynamic_weight_decay_max: float = 10.0
     dynamic_weight_decay_factor: float = 1.5
     dynamic_weight_decay_patience: int = 1000
+    dynamic_weight_decay_threshold: float = 0.01
+    dynamic_weight_decay_cooldown: int = 500
 
 
 class EpisodicDDPTrainer:
@@ -273,9 +276,12 @@ class EpisodicDDPTrainer:
             wd_config = WeightDecayConfig(
                 enabled=True,
                 initial=config.dynamic_weight_decay_initial,
+                min_value=config.dynamic_weight_decay_min,
                 max_value=config.dynamic_weight_decay_max,
                 adjustment_factor=config.dynamic_weight_decay_factor,
                 patience_steps=config.dynamic_weight_decay_patience,
+                excluded_loss_threshold=config.dynamic_weight_decay_threshold,
+                cooldown_steps=config.dynamic_weight_decay_cooldown,
             )
             self.weight_decay_scheduler = DynamicWeightDecayScheduler(
                 self.optimizer, wd_config
@@ -633,14 +639,22 @@ class EpisodicDDPTrainer:
                 metrics.update(grok_metrics.to_dict())
 
                 # Dynamic weight decay adjustment based on excluded_loss
-                if self.weight_decay_scheduler is not None and grok_metrics.excluded_loss > 0:
-                    adjusted = self.weight_decay_scheduler.step(grok_metrics.excluded_loss)
-                    if adjusted:
-                        print(
-                            f"  [Weight Decay] Adjusted to "
-                            f"{self.weight_decay_scheduler.current_weight_decay:.4f}"
+                if self.weight_decay_scheduler is not None:
+                    if grok_metrics.excluded_loss > 0:
+                        adjusted = self.weight_decay_scheduler.step(grok_metrics.excluded_loss)
+                        if adjusted:
+                            print(
+                                f"  [Weight Decay] Adjusted to "
+                                f"{self.weight_decay_scheduler.current_weight_decay:.4f}"
+                            )
+                        metrics.update(self.weight_decay_scheduler.get_stats())
+                    else:
+                        # Frequency ablation returned 0 - likely disabled or failed
+                        import logging
+                        logging.getLogger(__name__).debug(
+                            "Weight decay scheduler skipped: excluded_loss is 0 "
+                            "(frequency ablation may be disabled or failed)"
                         )
-                    metrics.update(self.weight_decay_scheduler.get_stats())
 
                 # Log grokking phase
                 if self.global_step % self.config.log_interval == 0:
