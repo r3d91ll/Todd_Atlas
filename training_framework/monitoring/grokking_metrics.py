@@ -18,11 +18,14 @@ References:
 - Nanda et al. (2023): "Progress Measures for Grokking via Mechanistic Interpretability"
 """
 
+import logging
 import numpy as np
 import torch
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any
 from collections import deque
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -231,7 +234,7 @@ class GrokkingDetector:
                     memory_matrices[layer_idx] = W.detach().cpu().numpy()
 
         except Exception:
-            pass
+            logger.debug("Failed to extract memory matrices from model", exc_info=True)
 
         return memory_matrices
 
@@ -385,7 +388,7 @@ class GrokkingDetector:
             metrics["fourier_concentration"] = self._fourier_concentration(W)
 
             # SVD for rank and effective dimensionality
-            U, S, Vh = np.linalg.svd(W, full_matrices=False)
+            _U, S, _Vh = np.linalg.svd(W, full_matrices=False)
 
             # Numerical rank (singular values > threshold)
             threshold = max(W.shape) * np.finfo(float).eps * S[0]
@@ -425,12 +428,14 @@ class GrokkingDetector:
         # Compute trends
         fourier_trend = self._compute_trend([m.embedding_fourier_concentration for m in recent])
         circular_trend = self._compute_trend([m.embedding_circular_fit for m in recent])
-        dim_trend = self._compute_trend([m.embedding_effective_dim_ratio for m in recent])
+        # TODO: incorporate dim_trend into phase detection
+        _dim_trend = self._compute_trend([m.embedding_effective_dim_ratio for m in recent])
 
         # Get retrieval accuracy if available (primary grokking signal for Atlas)
         retrieval_acc = val_metrics.get("retrieval_accuracy", 0) if val_metrics else 0
-        train_acc = train_metrics.get("accuracy", 0) if train_metrics else 0
-        val_acc = val_metrics.get("accuracy", 0) if val_metrics else 0
+        # TODO: incorporate train/val accuracy gap into phase detection
+        _train_acc = train_metrics.get("accuracy", 0) if train_metrics else 0
+        _val_acc = val_metrics.get("accuracy", 0) if val_metrics else 0
 
         # Phase detection logic
         structure_improving = (fourier_trend > 0.001 or circular_trend > 0.001)

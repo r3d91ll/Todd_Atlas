@@ -17,7 +17,7 @@ Train a small Atlas model (~10M parameters) on Dumas's works to:
 - d_model: 256
 - n_layers: 4
 - n_heads: 4
-- Parameters: ~14M
+- Parameters: ~10M
 
 ### Training
 - Episodic training with storage/retrieval phases
@@ -56,6 +56,6 @@ python scripts/download_corpus.py
 
 ## Expected Outputs
 
-- Checkpoints: `runs/dumas_kakeya/checkpoints/`
-- Metrics: `runs/dumas_kakeya/metrics/`
-- Grokking detection: `runs/dumas_kakeya/grokking/`
+- Checkpoints: `runs/atlas_dumas/checkpoints/`
+- Metrics: `runs/atlas_dumas/metrics_stream.jsonl`
+- Grokking detection: (tracked within metrics stream)

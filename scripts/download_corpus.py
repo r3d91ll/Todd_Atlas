@@ -187,7 +187,7 @@ def download_shakespeare(output_dir: Path):
         except Exception as e:
             print(f"  Error downloading {name}: {e}")
 
-    print(f"\nShakespeare corpus complete:")
+    print("\nShakespeare corpus complete:")
     print(f"  Paragraphs: {total_paragraphs:,}")
     print(f"  Characters: {total_chars:,}")
     print(f"  Estimated tokens: ~{total_chars // 4:,}")
@@ -216,7 +216,7 @@ def download_dumas(output_dir: Path):
         except Exception as e:
             print(f"  Error downloading {name}: {e}")
 
-    print(f"\nDumas corpus complete:")
+    print("\nDumas corpus complete:")
     print(f"  Paragraphs: {total_paragraphs:,}")
     print(f"  Characters: {total_chars:,}")
     print(f"  Estimated tokens: ~{total_chars // 4:,}")

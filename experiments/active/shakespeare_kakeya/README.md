@@ -17,7 +17,7 @@ Train a small Atlas model (~10M parameters) on Shakespeare's works to:
 - d_model: 256
 - n_layers: 4
 - n_heads: 4
-- Parameters: ~14M
+- Parameters: ~10M
 
 ### Training
 - Episodic training with storage/retrieval phases
@@ -50,6 +50,6 @@ python scripts/download_corpus.py
 
 ## Expected Outputs
 
-- Checkpoints: `runs/shakespeare_kakeya/checkpoints/`
-- Metrics: `runs/shakespeare_kakeya/metrics/`
-- Grokking detection: `runs/shakespeare_kakeya/grokking/`
+- Checkpoints: `runs/atlas_shakespeare/checkpoints/`
+- Metrics: `runs/atlas_shakespeare/metrics_stream.jsonl`
+- Grokking detection: (tracked within metrics stream)
