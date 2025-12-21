@@ -266,7 +266,8 @@ class BaseTrainer(ABC):
 
     def load_checkpoint(self, checkpoint_path: str) -> None:
         """Load training checkpoint."""
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        # weights_only=False needed for PyTorch 2.6+ (changed default)
+        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
 
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.global_step = checkpoint['global_step']

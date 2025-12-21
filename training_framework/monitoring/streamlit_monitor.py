@@ -64,10 +64,16 @@ def load_metrics(metrics_path: str, last_n: int = 10000) -> pd.DataFrame:
 
 
 def get_latest_metrics(df: pd.DataFrame) -> Dict[str, Any]:
-    """Get the most recent metrics."""
+    """Get the most recent metrics, forward-filling sparse columns.
+
+    Some metrics (like layer_X/memory_rank) are only computed at intervals,
+    so we need to get the most recent known value for each column.
+    """
     if df.empty:
         return {}
-    return df.iloc[-1].to_dict()
+    # Forward-fill to get most recent value for each column
+    # Then take the last row
+    return df.ffill().iloc[-1].to_dict()
 
 
 def compute_rolling_stats(df: pd.DataFrame, column: str, window: int = 100) -> pd.Series:
