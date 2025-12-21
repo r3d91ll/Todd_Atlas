@@ -117,6 +117,7 @@ class TrainerConfig:
     local_rank: int = 0
 
     # Telegram alerts (optional)
+    telegram_enabled: bool = False
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
@@ -219,7 +220,7 @@ class EpisodicDDPTrainer:
 
         # Alert system (optional)
         self.alert_system = None
-        if ALERTS_AVAILABLE and config.telegram_bot_token and config.telegram_chat_id:
+        if ALERTS_AVAILABLE and config.telegram_enabled and config.telegram_bot_token and config.telegram_chat_id:
             tg_config = TelegramConfig(
                 bot_token=config.telegram_bot_token,
                 chat_id=config.telegram_chat_id,
@@ -613,7 +614,7 @@ class EpisodicDDPTrainer:
 
         # File output (JSONL for Streamlit)
         self._metrics_buffer.append(metrics)
-        if len(self._metrics_buffer) >= 10:
+        if len(self._metrics_buffer) >= 1:
             self._flush_metrics()
 
     def _check_alerts(self, metrics: Dict[str, Any]) -> None:
