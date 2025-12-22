@@ -73,6 +73,22 @@ episodic:
 
   reset_memory_between_episodes: false
 
+  # Multi-task masked word prediction (NEW)
+  use_masked_retrieval: true    # Enable masked word prediction for retrieval
+  mask_token_id: 3              # Token ID for [MASK] (unused token slot)
+  num_masks: 1                  # Number of masks per sequence (start with 1)
+  pad_token_id: 0               # Padding token ID (skip when masking)
+
+# Multi-task training: Domain Universality Test (NEW)
+# Tests whether grokking is domain-universal or domain-specific
+# 50-50 split between language (masked word) and math (modular arithmetic)
+multi_task:
+  enabled: true
+  math_fraction: 0.5          # 50-50 split for Phase 1 (prove concept)
+  random_ordering: true       # Random within episodes, NOT blocks
+  math_prime: 97              # Modulus for modular arithmetic
+  math_operation: "add"       # Start with addition
+
 monitoring:
   dashboard_enabled: true
   dashboard_port: 8501
