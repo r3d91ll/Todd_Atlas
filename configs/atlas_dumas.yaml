@@ -9,6 +9,10 @@
 # - Momentum-based learning
 #
 # Expected training time: 1-2 hours on A6000
+#
+# References:
+# - Power et al. (2022): "Grokking: Generalization Beyond Overfitting on Small Algorithmic Datasets"
+# - Doshi et al. (2025): "Grokking at the Edge of Numerical Stability" (arXiv:2501.04697v2)
 
 model:
   # Scaled down dimensions (~10M params)
@@ -85,6 +89,13 @@ monitoring:
     fourier_concentration_target: 0.5   # Higher = more structured
     circular_fit_target: 0.8            # Higher = more circular
     effective_dim_ratio_target: 0.3     # Lower = more compressed
+
+  # Numerical stability monitoring (arXiv:2501.04697v2)
+  # Detects Softmax Collapse (SC) and Naïve Loss Minimization (NLM)
+  stability:
+    enabled: true                 # Enable SC/NLM monitoring
+    sc_threshold: 1e-7            # Threshold for SC detection
+    nlm_cosine_threshold: 0.7     # Cosine threshold for NLM detection
 
   alerts:
     gate_collapse_risk:

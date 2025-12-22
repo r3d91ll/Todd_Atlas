@@ -44,6 +44,16 @@ try:
 except ImportError:
     GROKKING_AVAILABLE = False
 
+# Import numerical stability metrics (optional)
+try:
+    from training_framework.monitoring.numerical_stability import (
+        NumericalStabilityMonitor,
+        NumericalStabilityMetrics,
+    )
+    STABILITY_AVAILABLE = True
+except ImportError:
+    STABILITY_AVAILABLE = False
+
 
 class TrainingPhase(Enum):
     """Training phase for gate floor scheduling."""
@@ -243,6 +253,15 @@ class EpisodicDDPTrainer:
             self.grokking_detector = GrokkingDetector(grok_config)
             print(f"Grokking detection enabled (interval: {config.grokking_interval} steps)")
 
+        # Numerical stability monitor (optional)
+        # Based on arXiv:2501.04697v2 "Grokking at the Edge of Numerical Stability"
+        self.stability_monitor = None
+        self._last_stability_metrics = None
+        self._last_logits = None  # Cache logits for stability analysis
+        if STABILITY_AVAILABLE and config.grokking_enabled:  # Use same flag as grokking
+            self.stability_monitor = NumericalStabilityMonitor()
+            print("Numerical stability monitoring enabled")
+
         # Initialize gate floor
         self._update_gate_floor()
 
@@ -376,6 +395,9 @@ class EpisodicDDPTrainer:
         # Backward
         scaled_loss = loss / self.config.gradient_accumulation_steps
         scaled_loss.backward()
+
+        # Cache logits for stability analysis (detach to avoid memory leak)
+        self._last_logits = logits.detach()
 
         return {
             'loss': loss.item(),
@@ -592,6 +614,33 @@ class EpisodicDDPTrainer:
             elif self._last_grokking_metrics is not None:
                 # Include last computed grokking phase in metrics
                 metrics['grokking/phase'] = self._last_grokking_metrics.phase
+
+        # Numerical stability metrics (computed at same interval as grokking)
+        # Based on arXiv:2501.04697v2 "Grokking at the Edge of Numerical Stability"
+        if self.stability_monitor is not None:
+            if self.global_step % self.config.grokking_interval == 0:
+                stability_metrics = self.stability_monitor.compute_metrics(
+                    model=model,
+                    logits=self._last_logits,
+                    step=self.global_step,
+                )
+                self._last_stability_metrics = stability_metrics
+                metrics.update(stability_metrics.to_dict())
+
+                # Log stability warnings
+                if stability_metrics.sc_risk in ('high', 'critical'):
+                    print(
+                        f"  [Stability] ⚠️ SC Risk: {stability_metrics.sc_risk} | "
+                        f"SC Fraction: {stability_metrics.sc_fraction:.1%} | "
+                        f"Max Logit: {stability_metrics.max_logit_mean:.1f}"
+                    )
+                if stability_metrics.nlm_active:
+                    print(
+                        f"  [Stability] ⚠️ NLM Active: Grad-Weight Cosine = {stability_metrics.grad_weight_cosine:.3f}"
+                    )
+            elif self._last_stability_metrics is not None:
+                # Include last computed stability risk in metrics
+                metrics['stability/sc_risk'] = self._last_stability_metrics.sc_risk
 
         return metrics
 

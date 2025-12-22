@@ -583,6 +583,166 @@ monitoring:
             st.plotly_chart(fig_corr, use_container_width=True)
 
 
+# === Page: Numerical Stability ===
+def page_numerical_stability(df: pd.DataFrame, latest: Dict[str, Any]):
+    """
+    Page for numerical stability monitoring.
+
+    Based on "Grokking at the Edge of Numerical Stability" (arXiv:2501.04697v2)
+    """
+    st.header("Numerical Stability")
+
+    # Check if stability metrics are available
+    stability_cols = [c for c in df.columns if c.startswith('stability/')]
+
+    if not stability_cols:
+        st.warning("Numerical stability metrics not detected. These metrics will appear once integrated into training.")
+        st.info("""
+**Numerical Stability Metrics** (from arXiv:2501.04697v2):
+- **Softmax Collapse (SC)**: Detects floating-point absorption in softmax
+- **NLM Gradient Alignment**: Detects naïve loss minimization (weight scaling)
+
+These metrics help understand WHY grokking happens and when the model
+is at risk of numerical instability that blocks learning.
+        """)
+        return
+
+    # Current stability status
+    st.subheader("Current Stability Status")
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        sc_risk = latest.get('stability/sc_risk', 'unknown')
+        risk_colors = {'low': '🟢', 'medium': '🟡', 'high': '🟠', 'critical': '🔴'}
+        risk_icon = risk_colors.get(sc_risk, '⚪')
+        st.metric("SC Risk", f"{risk_icon} {sc_risk}")
+
+    with col2:
+        sc_frac = latest.get('stability/sc_fraction', 0)
+        st.metric("SC Fraction", f"{sc_frac:.1%}")
+
+    with col3:
+        nlm_active = latest.get('stability/nlm_active', False)
+        nlm_icon = '🔴' if nlm_active else '🟢'
+        st.metric("NLM Active", f"{nlm_icon} {'Yes' if nlm_active else 'No'}")
+
+    with col4:
+        grad_cosine = latest.get('stability/grad_weight_cosine', 0)
+        st.metric("Grad-Weight Cosine", f"{grad_cosine:.3f}")
+
+    st.divider()
+
+    # Stability metrics over time
+    st.subheader("Stability Metrics Over Time")
+
+    # Filter to rows with stability data
+    stability_df = df[df['stability/sc_fraction'].notna()].copy() if 'stability/sc_fraction' in df.columns else pd.DataFrame()
+
+    if not stability_df.empty:
+        from plotly.subplots import make_subplots
+
+        fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=[
+                'Softmax Collapse Fraction',
+                'Gradient-Weight Cosine',
+                'Weight Norm',
+                'Max Logit Mean'
+            ]
+        )
+
+        # SC Fraction
+        if 'stability/sc_fraction' in stability_df.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=stability_df['step'],
+                    y=stability_df['stability/sc_fraction'],
+                    name='SC Fraction',
+                    line=dict(color='red')
+                ),
+                row=1, col=1
+            )
+            fig.add_hline(y=0.1, line_dash="dash", line_color="orange",
+                         row=1, col=1, annotation_text="Warning")
+            fig.add_hline(y=0.5, line_dash="dash", line_color="red",
+                         row=1, col=1, annotation_text="Critical")
+
+        # Gradient-weight cosine
+        if 'stability/grad_weight_cosine' in stability_df.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=stability_df['step'],
+                    y=stability_df['stability/grad_weight_cosine'],
+                    name='Grad-Weight Cosine',
+                    line=dict(color='purple')
+                ),
+                row=1, col=2
+            )
+            fig.add_hline(y=0.7, line_dash="dash", line_color="orange",
+                         row=1, col=2, annotation_text="NLM Threshold")
+
+        # Weight norm
+        if 'stability/weight_norm' in stability_df.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=stability_df['step'],
+                    y=stability_df['stability/weight_norm'],
+                    name='Weight Norm',
+                    line=dict(color='blue')
+                ),
+                row=2, col=1
+            )
+
+        # Max logit mean
+        if 'stability/max_logit_mean' in stability_df.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=stability_df['step'],
+                    y=stability_df['stability/max_logit_mean'],
+                    name='Max Logit',
+                    line=dict(color='green')
+                ),
+                row=2, col=2
+            )
+
+        fig.update_layout(height=600, showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # Interpretation guide
+    st.subheader("Interpretation Guide")
+
+    with st.expander("Understanding Numerical Stability (from arXiv:2501.04697v2)"):
+        st.markdown("""
+**Softmax Collapse (SC):**
+When logits become very large, softmax experiences floating-point absorption errors:
+- `sum(exp(z_k)) ≈ exp(z_max)` - smaller terms vanish
+- Gradients for correctly classified samples become zero
+- Learning stops completely
+
+**Naïve Loss Minimization (NLM):**
+After 100% train accuracy, gradients align with weight direction:
+- Model scales up logits to reduce loss (without learning)
+- Eventually triggers Softmax Collapse
+- Cosine similarity > 0.7 indicates NLM is active
+
+**Why Weight Decay Causes Grokking:**
+- Weight decay fights against NLM's logit scaling
+- Keeps model in numerically stable zone
+- Forces model to find generalizing circuits
+
+**Solutions (available in this codebase):**
+- **StableMax**: Numerically stable softmax replacement
+- **⊥Grad Optimizer**: Projects out weight-aligned gradients → immediate generalization
+
+**References:**
+- Doshi et al. (2025): "Grokking at the Edge of Numerical Stability" (arXiv:2501.04697v2)
+- Power et al. (2022): "Grokking: Generalization Beyond Overfitting"
+        """)
+
+
 # === Main App ===
 def main():
     # Parse arguments
@@ -631,7 +791,7 @@ def main():
     # Page selection
     page = st.sidebar.radio(
         "Page",
-        ["Live Overview", "Memory Deep Dive", "Grokking & Geometry", "Alerts & Health"]
+        ["Live Overview", "Memory Deep Dive", "Grokking & Geometry", "Numerical Stability", "Alerts & Health"]
     )
 
     st.sidebar.markdown("---")
@@ -645,6 +805,8 @@ def main():
         page_memory_deep_dive(df, latest)
     elif page == "Grokking & Geometry":
         page_grokking_geometry(df, latest)
+    elif page == "Numerical Stability":
+        page_numerical_stability(df, latest)
     else:
         page_alerts_health(df, latest)
 
