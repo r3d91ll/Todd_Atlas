@@ -1,6 +1,7 @@
 # Local secrets (never commit)
 configs/secrets.yaml
 .env
+.env.*
 
 # Training outputs
 runs/
@@ -8,10 +9,14 @@ checkpoints/
 *.pt
 *.pth
 *.safetensors
+*.ckpt
+metrics*.jsonl
 
 # Data files (large, downloaded separately)
+data
 data/
 datasets
+datasets/
 
 # Tokenizer training corpus (too large for GitHub)
 tokenizer/*/training_corpus.txt
@@ -20,14 +25,56 @@ tokenizer/*/training_corpus.txt
 *.png
 *.jpg
 *.jpeg
+*.gif
 
-# Python
+# Python virtual environments
+venv
+venv/
+.venv
+.venv/
+env/
+.env/
+
+# Python cache
 __pycache__/
 *.py[cod]
-venv/
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
 
 # Logs
 *.log
+nohup.out
+
+# OS files
+.DS_Store
+Thumbs.db
 
 # LaTeX build artifacts
 *.aux
@@ -36,3 +83,8 @@ venv/
 *.out
 *.synctex.gz
 *.toc
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
