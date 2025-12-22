@@ -1,0 +1,135 @@
+# Atlas Modular Arithmetic Configuration
+# Purpose: Test grokking on deterministic task with meaningful retrieval accuracy
+#
+# Based on Power et al. (2022): "Grokking: Generalization Beyond Overfitting"
+# Task: (a + b) mod 97 - each input has exactly ONE correct answer
+#
+# Key differences from Shakespeare/Dumas experiments:
+# - Deterministic answers: retrieval accuracy is now meaningful
+# - Small vocab (102 tokens): numbers 0-96, operators +, -, *, /, =
+# - Small model: grokking typically uses 2-layer transformers
+# - High weight decay: critical for grokking (1.0 as per paper)
+# - Long training: grokking happens suddenly after many steps
+#
+# Expected behavior:
+# 1. Training accuracy reaches ~100% quickly (memorization)
+# 2. Validation accuracy stays low for many steps
+# 3. Suddenly, validation accuracy jumps to ~100% (grokking!)
+#
+# References:
+# - Power et al. (2022): "Grokking: Generalization Beyond Overfitting"
+# - Doshi et al. (2025): "Grokking at the Edge of Numerical Stability"
+
+model:
+  # Small model for grokking (similar to Power et al.)
+  d_model: 128
+  n_layers: 2
+  n_heads: 4
+  d_ff: 512
+  vocab_size: 102  # 97 numbers + 5 special tokens (+, -, *, /, =)
+  max_seq_len: 6   # Sequence: [a, op, b, =, c] = 5 tokens + padding
+
+  # Omega memory config (scaled down)
+  d_key: 128
+  d_value: 128
+  poly_degree: 2
+  context_window: 4  # Small context for short sequences
+  init_alpha: 0.99
+  init_theta: 0.9
+  init_eta: 0.1
+  window_size: 6
+
+  dropout: 0.1
+
+training:
+  # Long training - grokking happens after many steps
+  max_steps: 100000
+  learning_rate: 1e-3
+  weight_decay: 1.0  # HIGH weight decay - critical for grokking!
+  warmup_steps: 100
+  grad_clip: 1.0
+
+  batch_size: 512  # Large batch - dataset is small
+  gradient_accumulation_steps: 1
+
+  log_interval: 100
+  eval_interval: 500  # Evaluate on validation set frequently
+  checkpoint_interval: 5000
+
+  metrics_path: "runs/atlas_modular_arithmetic/metrics_stream.jsonl"
+  checkpoint_dir: "runs/atlas_modular_arithmetic/checkpoints"
+
+  device: "cuda:1"
+  dtype: "float32"  # Use float32 for stability on small model
+  compile_model: false
+
+# Task-specific settings
+task:
+  type: "modular_arithmetic"
+  prime: 97
+  operation: "add"  # Start with addition, can try mul later
+  train_fraction: 0.5  # 50% train, 50% val (standard grokking split)
+
+episodic:
+  enabled: true
+  storage_samples: 5
+  retrieval_samples: 5
+
+  # For deterministic tasks, we can be more aggressive with gating
+  phase1_steps: 1000
+  phase2_steps: 2000
+  phase1_gate_floor: 0.30
+  phase2_gate_floor: 0.10
+  phase3_gate_floor: 0.05
+
+  storage_gate_target: 0.80
+  retrieval_gate_floor: 0.30
+
+  retrieval_loss_weight: 10.0  # Higher weight for deterministic task
+  storage_loss_weight: 1.0
+
+  reset_memory_between_episodes: false
+
+monitoring:
+  dashboard_enabled: true
+  dashboard_port: 8502  # Different port from Shakespeare/Dumas
+
+  grokking:
+    enabled: true
+    metrics_interval: 500
+    track_embeddings: true
+    track_memory_matrices: true
+    track_hidden_states: true
+
+    # Adjust thresholds for small model
+    fourier_concentration_target: 0.5
+    circular_fit_target: 0.8
+    effective_dim_ratio_target: 0.3
+
+  stability:
+    enabled: true
+    sc_threshold: 1e-7
+    nlm_cosine_threshold: 0.7
+    use_stablemax: true
+    use_orthogonal_grad: true
+    orthogonal_grad_strength: 1.0
+
+  alerts:
+    gate_collapse_risk:
+      threshold: 0.80
+      severity: "critical"
+    val_accuracy:  # NEW: track validation accuracy for grokking
+      threshold: 0.95
+      severity: "info"
+      direction: "above"
+      message: "GROKKING DETECTED!"
+
+  telegram:
+    enabled: false
+
+# Early stopping on grokking
+early_stopping:
+  enabled: true
+  metric: "val_accuracy"
+  threshold: 0.99  # Stop when validation accuracy hits 99%
+  patience: 1000   # Wait 1000 steps after hitting threshold to confirm
