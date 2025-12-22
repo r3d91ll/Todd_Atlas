@@ -408,9 +408,11 @@ class GrokkingDetector:
             # SVD for rank and effective dimensionality
             U, S, Vh = np.linalg.svd(W, full_matrices=False)
 
-            # Numerical rank (singular values > threshold)
-            threshold = max(W.shape) * np.finfo(float).eps * S[0]
-            metrics["numerical_rank"] = float(np.sum(S > threshold))
+            # Effective rank via entropy of singular values
+            # (Same formula as Memory Adapter - more meaningful than numerical rank)
+            S_norm = S / (np.sum(S) + 1e-10)
+            entropy = -np.sum(S_norm * np.log(S_norm + 1e-10))
+            metrics["numerical_rank"] = float(np.exp(entropy))
 
             # Effective dimensionality (cumulative energy)
             energy = S**2
