@@ -481,8 +481,9 @@ class ChunkedTitansMemory(TitansMemory):
         # Concatenate outputs
         output = torch.cat(outputs, dim=1)
 
-        # For gradient computation, we need the final non-detached state
-        # Re-run last chunk without detach for proper gradients
+        # For gradient computation on the final state, re-run the last chunk
+        # without detaching its output. This allows gradients to flow through
+        # the last chunk's update, but not back to previous chunks (TNT approach).
         if len(chunks) > 0:
             last_chunk = chunks[-1]
             # Use second-to-last state (or initial if only one chunk)
