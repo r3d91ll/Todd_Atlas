@@ -325,8 +325,14 @@ class EpisodicDDPTrainer:
             self.data_iter = iter(self.train_dataloader)
             batch = next(self.data_iter)
 
-        # Move to device
-        return {k: v.to(self.device) for k, v in batch.items()}
+        # Move tensors to device, keep non-tensors as-is (e.g., task_types list)
+        result = {}
+        for k, v in batch.items():
+            if hasattr(v, 'to'):
+                result[k] = v.to(self.device)
+            else:
+                result[k] = v
+        return result
 
     def _update_training_phase(self) -> None:
         """Update training phase based on step count."""
