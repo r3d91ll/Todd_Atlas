@@ -640,8 +640,6 @@ is at risk of numerical instability that blocks learning.
     stability_df = df[df['stability/sc_fraction'].notna()].copy() if 'stability/sc_fraction' in df.columns else pd.DataFrame()
 
     if not stability_df.empty:
-        from plotly.subplots import make_subplots
-
         fig = make_subplots(
             rows=2, cols=2,
             subplot_titles=[
