@@ -52,7 +52,14 @@ class GrokkingMetrics:
     """Container for grokking-related metrics."""
     step: int = 0
 
-    # Embedding metrics
+    # Multi-task accuracies (NEW: separate tracking for domain universality test)
+    math_accuracy: float = 0.0           # Modular arithmetic accuracy
+    masked_word_accuracy: float = 0.0    # Language masked word accuracy
+    overall_accuracy: float = 0.0        # Combined (50-50 weighted)
+
+    # Embedding metrics (computed on MATH embeddings when available)
+    # NOTE: Fourier/Circular are meaningless for natural language embeddings
+    # They detect circular structure in mod p arithmetic
     embedding_fourier_concentration: float = 0.0
     embedding_circular_fit: float = 0.0
     embedding_effective_dim: int = 0
@@ -83,6 +90,11 @@ class GrokkingMetrics:
         """Convert to dictionary for logging."""
         return {
             "step": self.step,
+            # Multi-task accuracies
+            "grokking/math_accuracy": self.math_accuracy,
+            "grokking/masked_word_accuracy": self.masked_word_accuracy,
+            "grokking/overall_accuracy": self.overall_accuracy,
+            # Geometric metrics (meaningful for MATH task only)
             "grokking/embedding_fourier_concentration": self.embedding_fourier_concentration,
             "grokking/embedding_circular_fit": self.embedding_circular_fit,
             "grokking/embedding_effective_dim": self.embedding_effective_dim,
@@ -127,6 +139,7 @@ class GrokkingDetector:
         step: int,
         train_metrics: Optional[Dict] = None,
         val_metrics: Optional[Dict] = None,
+        task_metrics: Optional[Dict] = None,  # NEW: multi-task accuracies
         gate_mean: float = 1.0,
     ) -> GrokkingMetrics:
         """
@@ -137,10 +150,16 @@ class GrokkingDetector:
             step: Current training step
             train_metrics: Optional dict with train_loss, train_accuracy
             val_metrics: Optional dict with val_loss, val_accuracy, retrieval_accuracy
+            task_metrics: Optional dict with math_accuracy, masked_word_accuracy (multi-task)
             gate_mean: Average gate value from training (Atlas-specific)
 
         Returns:
             GrokkingMetrics with all computed values
+
+        Note:
+            Fourier concentration and circular fit are ONLY meaningful for
+            modular arithmetic (math task). For natural language, these
+            metrics are noise - language has no reason to form circles.
         """
         metrics = GrokkingMetrics(step=step)
 
@@ -148,8 +167,22 @@ class GrokkingDetector:
         metrics.gate_mean = gate_mean
         metrics.gate_healthy = gate_mean >= self.config.min_gate_mean
 
+        # Multi-task accuracies (NEW: track separately for domain universality test)
+        if task_metrics:
+            metrics.math_accuracy = task_metrics.get('math_accuracy', 0.0)
+            metrics.masked_word_accuracy = task_metrics.get('masked_word_accuracy', 0.0)
+            # Combined with 50-50 weighting (matches training split)
+            if metrics.math_accuracy > 0 or metrics.masked_word_accuracy > 0:
+                metrics.overall_accuracy = (
+                    metrics.math_accuracy * 0.5 +
+                    metrics.masked_word_accuracy * 0.5
+                )
+
         with torch.no_grad():
             # 1. Embedding metrics
+            # NOTE: Fourier/Circular only meaningful for MATH embeddings
+            # For language, these will be noise, but we compute them anyway
+            # and use math_accuracy for phase detection
             if self.config.track_embeddings:
                 embeddings = self._get_embeddings(model)
                 if embeddings is not None:
@@ -179,8 +212,8 @@ class GrokkingDetector:
             # 3. Hidden state metrics (if available from forward pass)
             # These would need to be passed in from the training loop
 
-        # 4. Phase detection
-        metrics.phase = self._detect_phase(metrics, train_metrics, val_metrics)
+        # 4. Phase detection (uses MATH metrics where meaningful)
+        metrics.phase = self._detect_phase(metrics, train_metrics, val_metrics, task_metrics)
 
         # Store for history
         self.history.append(metrics)
@@ -431,31 +464,41 @@ class GrokkingDetector:
         metrics: GrokkingMetrics,
         train_metrics: Optional[Dict],
         val_metrics: Optional[Dict],
+        task_metrics: Optional[Dict] = None,
     ) -> str:
         """
         Detect current grokking phase based on metrics and trends.
 
-        Atlas-Specific Phase Detection:
+        Multi-Task Phase Detection:
+        - Uses MATH accuracy for phase detection (Fourier/Circular are meaningful here)
+        - Language accuracy tracked separately but not used for phase
         - Requires healthy gate values (gate_mean > min_gate_mean)
-        - Uses lower retrieval threshold for language modeling
 
         Phases:
         - memorization: High train acc, low val/retrieval acc, low structure
-        - circuit_formation: Structure metrics increasing
-        - cleanup: Val/retrieval acc jumping up
-        - grokked: Stable high performance + stable structure + healthy gates
+        - circuit_formation: Structure metrics (Fourier/Circular) increasing
+        - cleanup: Math accuracy jumping up
+        - grokked: Stable high math performance + stable structure + healthy gates
         """
         if len(self.history) < self.config.trend_window:
             return "insufficient_data"
 
         recent = list(self.history)[-self.config.trend_window:]
 
-        # Compute trends
+        # Compute trends (Fourier/Circular meaningful for MATH, noise for language)
         fourier_trend = self._compute_trend([m.embedding_fourier_concentration for m in recent])
         circular_trend = self._compute_trend([m.embedding_circular_fit for m in recent])
-        dim_trend = self._compute_trend([m.embedding_effective_dim_ratio for m in recent])
+        # dim_trend reserved for future use
+        _dim_trend = self._compute_trend([m.embedding_effective_dim_ratio for m in recent])
 
-        # Get retrieval accuracy if available (primary grokking signal for Atlas)
+        # Multi-task: Use MATH accuracy as primary grokking signal
+        # Fourier/Circular are meaningful for mod arithmetic, not language
+        # masked_word_accuracy tracked separately but not used for phase detection
+        math_acc = 0.0
+        if task_metrics:
+            math_acc = task_metrics.get("math_accuracy", 0)
+
+        # Fallback to legacy retrieval accuracy
         retrieval_acc = val_metrics.get("retrieval_accuracy", 0) if val_metrics else 0
         train_acc = train_metrics.get("accuracy", 0) if train_metrics else 0
         val_acc = val_metrics.get("accuracy", 0) if val_metrics else 0
@@ -467,8 +510,12 @@ class GrokkingDetector:
         # Atlas-specific: Check gate health
         gate_healthy = metrics.gate_healthy
 
-        # Use configurable thresholds
+        # Use MATH accuracy for grokking detection (where Fourier/Circular are meaningful)
+        # High math accuracy = geometric structure learned
+        high_math = math_acc > 0.9  # 90% math accuracy = clear grokking
         high_retrieval = retrieval_acc > self.config.min_retrieval_accuracy
+
+        # Geometric structure thresholds
         high_structure = (
             metrics.embedding_fourier_concentration > self.config.fourier_concentration_target and
             metrics.embedding_circular_fit > self.config.circular_fit_target
@@ -476,12 +523,12 @@ class GrokkingDetector:
 
         # ATLAS REQUIREMENT: Must have healthy gates to be considered "grokked"
         # If gates collapsed, memory is bypassed and model hasn't truly grokked
-        if high_retrieval and high_structure and structure_stable and gate_healthy:
+        if (high_math or high_retrieval) and high_structure and structure_stable and gate_healthy:
             return "grokked"
         elif not gate_healthy:
             # Gate collapse - model is bypassing memory, stuck in attention-only mode
             return "gate_collapse"
-        elif high_retrieval or structure_improving:
+        elif high_math or high_retrieval:
             return "cleanup"
         elif structure_improving:
             return "circuit_formation"
