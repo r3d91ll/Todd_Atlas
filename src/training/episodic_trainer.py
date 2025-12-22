@@ -501,6 +501,10 @@ class EpisodicDDPTrainer:
         scaled_loss = total_loss / self.config.gradient_accumulation_steps
         scaled_loss.backward()
 
+        # Cache logits for stability analysis (detach to avoid memory leak)
+        # Must be set in both storage and retrieval steps for fresh metrics
+        self._last_logits = logits.detach()
+
         metrics = {
             'loss': total_loss.item(),
             'lm_loss': lm_loss.item(),
