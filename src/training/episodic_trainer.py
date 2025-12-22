@@ -25,6 +25,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from ..model.attention import GateMode
 from .retrieval_verifier import RetrievalVerifier
+from .masking import create_masked_batch, create_math_masked_batch, compute_masked_accuracy
 
 # Import alert system (optional)
 try:
@@ -106,6 +107,12 @@ class EpisodicConfig:
 
     # Memory resets
     reset_memory_between_episodes: bool = False
+
+    # Multi-task masked word prediction (NEW)
+    use_masked_retrieval: bool = True    # Enable masked word prediction
+    mask_token_id: int = 3               # Token ID for [MASK]
+    num_masks: int = 1                   # Number of masks per sequence
+    pad_token_id: int = 0                # Padding token ID (skip when masking)
 
 
 @dataclass
@@ -455,10 +462,165 @@ class EpisodicDDPTrainer:
         """
         Execute retrieval phase step.
 
+        Routes to appropriate retrieval method based on task type:
+        - 'language': Masked word prediction (pure random masking)
+        - 'math': Modular arithmetic (answer prediction)
+
         During retrieval:
         - Gate mode is RETRIEVAL (minimum gate floor)
-        - LM loss + heavy retrieval penalty
-        - Verify retrieval accuracy
+        - Heavy penalty for wrong answers
+        - Track separate accuracies per task type
+        """
+        # Check task type from multi-task loader
+        task_type = batch.get('task_type', 'language')
+
+        if self.ep_config.use_masked_retrieval:
+            if task_type == 'math':
+                return self._math_retrieval_step(batch)
+            else:
+                return self._language_retrieval_step(batch)
+        else:
+            # Legacy retrieval (original behavior)
+            return self._legacy_retrieval_step(batch)
+
+    def _language_retrieval_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
+        """
+        Execute language retrieval with PURE RANDOM masked word prediction.
+
+        Model sees: "Shall I [MASK] thee to a [MASK] day..."
+        Must output: ["compare", "summer"] from memory
+
+        No heuristics. Pure random masking. Model MUST use memory.
+        """
+        # Create masked version of the batch
+        masked_batch, mask_positions, original_tokens = create_masked_batch(
+            batch,
+            mask_token_id=self.ep_config.mask_token_id,
+            num_masks=self.ep_config.num_masks,
+            pad_token_id=self.ep_config.pad_token_id,
+        )
+
+        input_ids = masked_batch['input_ids'].to(self.device)
+        mask_positions = mask_positions.to(self.device)
+        original_tokens = original_tokens.to(self.device)
+
+        with torch.autocast(device_type='cuda', dtype=self.dtype):
+            logits, self.memory_states, _ = self.model(
+                input_ids,
+                memory_states=self.memory_states,
+                return_metrics=True,
+            )
+
+            batch_size = logits.size(0)
+            num_masks = self.ep_config.num_masks
+
+            # Gather logits at ALL masked positions
+            masked_logits_list = []
+            for k in range(num_masks):
+                pos = mask_positions[:, k]  # [batch]
+                # Handle -1 positions (no mask) by clamping
+                valid_pos = pos.clamp(min=0)
+                ml = logits[torch.arange(batch_size, device=self.device), valid_pos, :]
+                masked_logits_list.append(ml)
+
+            # Stack: [batch, num_masks, vocab]
+            masked_logits = torch.stack(masked_logits_list, dim=1)
+
+            # Predictions
+            predictions = masked_logits.argmax(dim=-1)  # [batch, num_masks]
+
+            # Exact match accuracy
+            accuracy = compute_masked_accuracy(predictions, original_tokens, mask_positions)
+
+            # Loss on masked positions only
+            if self.criterion is not None:
+                loss = self.criterion(
+                    masked_logits.view(-1, masked_logits.size(-1)),
+                    original_tokens.view(-1),
+                )
+            else:
+                loss = F.cross_entropy(
+                    masked_logits.view(-1, masked_logits.size(-1)),
+                    original_tokens.view(-1),
+                    ignore_index=-1,  # Ignore -1 tokens (no mask)
+                )
+            loss = loss * self.ep_config.retrieval_loss_weight
+
+        # Backward
+        scaled_loss = loss / self.config.gradient_accumulation_steps
+        scaled_loss.backward()
+
+        # Cache logits for stability analysis
+        self._last_logits = logits.detach()
+
+        return {
+            'loss': loss.item(),
+            'retrieval_loss': loss.item(),
+            'masked_word_accuracy': accuracy,
+            'task_type': 'language',
+            'phase': 'retrieval',
+            'num_masks': num_masks,
+        }
+
+    def _math_retrieval_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
+        """
+        Execute modular arithmetic retrieval.
+
+        Input: "23 + 45 = [MASK]"
+        Must output: "68" (mod 97)
+
+        Fourier/Circular geometric metrics apply to this task.
+        """
+        # Create masked version (answer always at last position)
+        masked_batch, mask_positions, original_tokens = create_math_masked_batch(
+            batch,
+            mask_token_id=self.ep_config.mask_token_id,
+        )
+
+        input_ids = masked_batch['input_ids'].to(self.device)
+        answers = batch['answer'].to(self.device)
+
+        with torch.autocast(device_type='cuda', dtype=self.dtype):
+            logits, self.memory_states, _ = self.model(
+                input_ids,
+                memory_states=self.memory_states,
+                return_metrics=True,
+            )
+
+            # Answer is always at last position for math
+            answer_logits = logits[:, -1, :]  # [batch, vocab]
+            predictions = answer_logits.argmax(dim=-1)  # [batch]
+
+            # Exact match accuracy
+            accuracy = (predictions == answers.squeeze(-1)).float().mean().item()
+
+            # Loss on answer position
+            if self.criterion is not None:
+                loss = self.criterion(answer_logits, answers.squeeze(-1))
+            else:
+                loss = F.cross_entropy(answer_logits, answers.squeeze(-1))
+            loss = loss * self.ep_config.retrieval_loss_weight
+
+        # Backward
+        scaled_loss = loss / self.config.gradient_accumulation_steps
+        scaled_loss.backward()
+
+        # Cache logits for stability analysis
+        self._last_logits = logits.detach()
+
+        return {
+            'loss': loss.item(),
+            'retrieval_loss': loss.item(),
+            'math_accuracy': accuracy,
+            'task_type': 'math',
+            'phase': 'retrieval',
+        }
+
+    def _legacy_retrieval_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
+        """
+        Legacy retrieval step (original behavior without masking).
+
+        Kept for backward compatibility with existing experiments.
         """
         input_ids = batch.get('input_ids', batch.get('inputs'))
         labels = batch.get('labels', input_ids)
@@ -549,6 +711,9 @@ class EpisodicDDPTrainer:
             'storage_losses': [],
             'retrieval_losses': [],
             'retrieval_accuracies': [],
+            # Multi-task separate tracking
+            'math_accuracies': [],
+            'masked_word_accuracies': [],
         }
 
         # Collect batches for this episode - we'll reuse them for retrieval
@@ -579,10 +744,17 @@ class EpisodicDDPTrainer:
             metrics = self._retrieval_step(batch)
             episode_metrics['retrieval_losses'].append(metrics['loss'])
 
+            # Track legacy accuracy
             if 'retrieval_token_accuracy' in metrics:
                 episode_metrics['retrieval_accuracies'].append(
                     metrics['retrieval_token_accuracy']
                 )
+
+            # Track multi-task accuracies separately
+            if 'math_accuracy' in metrics:
+                episode_metrics['math_accuracies'].append(metrics['math_accuracy'])
+            if 'masked_word_accuracy' in metrics:
+                episode_metrics['masked_word_accuracies'].append(metrics['masked_word_accuracy'])
 
             self.episode_step += 1
 
@@ -602,10 +774,31 @@ class EpisodicDDPTrainer:
             'training_phase': self.training_phase.value,
         }
 
+        # Legacy retrieval accuracy
         if episode_metrics['retrieval_accuracies']:
             aggregated['retrieval_accuracy_mean'] = (
                 sum(episode_metrics['retrieval_accuracies']) /
                 len(episode_metrics['retrieval_accuracies'])
+            )
+
+        # Multi-task accuracies (separate tracking)
+        if episode_metrics['math_accuracies']:
+            aggregated['math_accuracy'] = (
+                sum(episode_metrics['math_accuracies']) /
+                len(episode_metrics['math_accuracies'])
+            )
+
+        if episode_metrics['masked_word_accuracies']:
+            aggregated['masked_word_accuracy'] = (
+                sum(episode_metrics['masked_word_accuracies']) /
+                len(episode_metrics['masked_word_accuracies'])
+            )
+
+        # Combined overall accuracy (50-50 weighting to match training split)
+        if episode_metrics['math_accuracies'] and episode_metrics['masked_word_accuracies']:
+            aggregated['overall_accuracy'] = (
+                aggregated['math_accuracy'] * 0.5 +
+                aggregated['masked_word_accuracy'] * 0.5
             )
 
         # Reset memory between episodes if configured
