@@ -54,12 +54,18 @@ class StableMax(nn.Module):
 
         Returns:
             StableMax probabilities (same shape as input)
+
+        Note: We use clamp to ensure division doesn't produce inf/nan.
+        torch.where evaluates both branches, so 1/(1-x) is computed
+        even for x >= 0 where it's not selected. When x = 1 exactly,
+        this would produce inf. Clamping prevents this.
         """
         # Apply piecewise transformation s(x)
+        # Clamp denominators to avoid division by zero
         s_x = torch.where(
             x >= 0,
-            x + 1,  # x + 1 for x >= 0
-            1.0 / (1 - x)  # 1/(1-x) for x < 0
+            x + 1,  # x + 1 for x >= 0 (always >= 1)
+            1.0 / torch.clamp(1 - x, min=1e-10)  # 1/(1-x) for x < 0 (always > 1)
         )
 
         # Normalize
@@ -71,17 +77,29 @@ class StableMax(nn.Module):
         Compute log(StableMax(x)) in a numerically stable way.
 
         Useful for computing StableCE loss.
+
+        Note: We must avoid computing log of negative numbers. Since torch.where
+        evaluates BOTH branches before selecting, we clamp values to ensure
+        both branches produce valid results for all inputs.
         """
+        # Compute s(x) for normalization
+        # Clamp denominator to avoid division by zero (same as forward())
         s_x = torch.where(
             x >= 0,
             x + 1,
-            1.0 / (1 - x)
+            1.0 / torch.clamp(1 - x, min=1e-10)
         )
 
+        # Compute log(s(x)) safely
+        # For x >= 0: log(x + 1), but x + 1 is always >= 1, so safe
+        # For x < 0: -log(1 - x), where 1 - x > 1, so safe
+        # However, torch.where evaluates BOTH branches for ALL elements,
+        # so we must ensure both computations are valid for all x values.
+        # Clamp inputs to ensure log arguments are always positive.
         log_s_x = torch.where(
             x >= 0,
-            torch.log(x + 1),
-            -torch.log(1 - x)
+            torch.log(torch.clamp(x + 1, min=1e-10)),  # Always positive for x >= 0
+            -torch.log(torch.clamp(1 - x, min=1e-10))  # Always positive for x < 0
         )
 
         log_sum = torch.log(s_x.sum(dim=dim, keepdim=True))
