@@ -54,6 +54,20 @@ try:
 except ImportError:
     STABILITY_AVAILABLE = False
 
+# Import StableMax loss (arXiv:2501.04697v2)
+try:
+    from .stablemax import StableCrossEntropyLoss
+    STABLEMAX_AVAILABLE = True
+except ImportError:
+    STABLEMAX_AVAILABLE = False
+
+# Import OrthogonalGrad optimizer (arXiv:2501.04697v2)
+try:
+    from .orthogonal_grad import OrthogonalGradWrapper
+    ORTHOGONAL_GRAD_AVAILABLE = True
+except ImportError:
+    ORTHOGONAL_GRAD_AVAILABLE = False
+
 
 class TrainingPhase(Enum):
     """Training phase for gate floor scheduling."""
@@ -135,6 +149,13 @@ class TrainerConfig:
     grokking_enabled: bool = False
     grokking_interval: int = 500
 
+    # Numerical stability options (arXiv:2501.04697v2)
+    # StableMax: Numerically stable softmax alternative
+    use_stablemax: bool = True  # Use StableCrossEntropyLoss instead of F.cross_entropy
+    # ⊥Grad: Project out weight-aligned gradients for immediate generalization
+    use_orthogonal_grad: bool = True
+    orthogonal_grad_strength: float = 1.0  # 0.0 = disabled, 1.0 = full projection
+
 
 class EpisodicDDPTrainer:
     """
@@ -192,17 +213,41 @@ class EpisodicDDPTrainer:
         self.data_iter = iter(train_dataloader)
 
         # Optimizer and scheduler
-        self.optimizer = AdamW(
+        base_optimizer = AdamW(
             self.model.parameters(),
             lr=config.learning_rate,
             weight_decay=config.weight_decay,
             betas=(0.9, 0.95),
         )
+
+        # Wrap with OrthogonalGrad if enabled (arXiv:2501.04697v2)
+        # Projects out weight-aligned gradients for immediate generalization
+        if config.use_orthogonal_grad and ORTHOGONAL_GRAD_AVAILABLE:
+            self.optimizer = OrthogonalGradWrapper(
+                base_optimizer,
+                self.model,
+                projection_strength=config.orthogonal_grad_strength,
+            )
+            print(f"⊥Grad optimizer enabled (strength: {config.orthogonal_grad_strength})")
+        else:
+            self.optimizer = base_optimizer
+            if config.use_orthogonal_grad and not ORTHOGONAL_GRAD_AVAILABLE:
+                print("Warning: OrthogonalGrad requested but not available")
+
         self.scheduler = CosineAnnealingLR(
-            self.optimizer,
+            self.optimizer if not hasattr(self.optimizer, 'optimizer') else self.optimizer.optimizer,
             T_max=config.max_steps - config.warmup_steps,
             eta_min=config.learning_rate * 0.1,
         )
+
+        # StableMax loss criterion (arXiv:2501.04697v2)
+        # Numerically stable alternative to softmax that prevents collapse
+        self.criterion = None
+        if config.use_stablemax and STABLEMAX_AVAILABLE:
+            self.criterion = StableCrossEntropyLoss(ignore_index=-100)
+            print("StableMax loss enabled")
+        elif config.use_stablemax and not STABLEMAX_AVAILABLE:
+            print("Warning: StableMax requested but not available, using F.cross_entropy")
 
         # Retrieval verification
         self.retrieval_verifier = RetrievalVerifier(
@@ -373,14 +418,20 @@ class EpisodicDDPTrainer:
                 return_metrics=True,
             )
 
-            # Standard LM loss
+            # Standard LM loss (use StableMax if enabled)
             shift_logits = logits[:, :-1, :].contiguous()
             shift_labels = labels[:, 1:].contiguous()
-            loss = F.cross_entropy(
-                shift_logits.view(-1, shift_logits.size(-1)),
-                shift_labels.view(-1),
-                ignore_index=-100,
-            )
+            if self.criterion is not None:
+                loss = self.criterion(
+                    shift_logits.view(-1, shift_logits.size(-1)),
+                    shift_labels.view(-1),
+                )
+            else:
+                loss = F.cross_entropy(
+                    shift_logits.view(-1, shift_logits.size(-1)),
+                    shift_labels.view(-1),
+                    ignore_index=-100,
+                )
             loss = loss * self.ep_config.storage_loss_weight
 
         # Record storage for verification
@@ -425,14 +476,20 @@ class EpisodicDDPTrainer:
                 return_metrics=True,
             )
 
-            # Standard LM loss
+            # Standard LM loss (use StableMax if enabled)
             shift_logits = logits[:, :-1, :].contiguous()
             shift_labels = labels[:, 1:].contiguous()
-            lm_loss = F.cross_entropy(
-                shift_logits.view(-1, shift_logits.size(-1)),
-                shift_labels.view(-1),
-                ignore_index=-100,
-            )
+            if self.criterion is not None:
+                lm_loss = self.criterion(
+                    shift_logits.view(-1, shift_logits.size(-1)),
+                    shift_labels.view(-1),
+                )
+            else:
+                lm_loss = F.cross_entropy(
+                    shift_logits.view(-1, shift_logits.size(-1)),
+                    shift_labels.view(-1),
+                    ignore_index=-100,
+                )
 
         # Compute retrieval loss and verification
         batch_hash = self._compute_batch_hash(batch)

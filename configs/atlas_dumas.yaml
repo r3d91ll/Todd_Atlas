@@ -90,12 +90,22 @@ monitoring:
     circular_fit_target: 0.8            # Higher = more circular
     effective_dim_ratio_target: 0.3     # Lower = more compressed
 
-  # Numerical stability monitoring (arXiv:2501.04697v2)
+  # Numerical stability (arXiv:2501.04697v2)
   # Detects Softmax Collapse (SC) and Naïve Loss Minimization (NLM)
+  # Also provides solutions: StableMax and ⊥Grad optimizer
   stability:
     enabled: true                 # Enable SC/NLM monitoring
     sc_threshold: 1e-7            # Threshold for SC detection
     nlm_cosine_threshold: 0.7     # Cosine threshold for NLM detection
+
+    # StableMax: Numerically stable softmax alternative
+    # Prevents floating-point absorption that causes gradient death
+    use_stablemax: true
+
+    # ⊥Grad: Orthogonal gradient projection
+    # Projects out weight-aligned gradients for immediate generalization
+    use_orthogonal_grad: true
+    orthogonal_grad_strength: 1.0  # 0.0 = disabled, 1.0 = full projection
 
   alerts:
     gate_collapse_risk:
