@@ -61,9 +61,9 @@ try:
 except ImportError:
     STABLEMAX_AVAILABLE = False
 
-# Import OrthogonalGrad optimizer (arXiv:2501.04697v2)
+# Import orthogonal gradient projection (arXiv:2501.04697v2)
 try:
-    from .orthogonal_grad import OrthogonalGradWrapper
+    from .orthogonal_grad import apply_orthogonal_projection
     ORTHOGONAL_GRAD_AVAILABLE = True
 except ImportError:
     ORTHOGONAL_GRAD_AVAILABLE = False
@@ -213,29 +213,23 @@ class EpisodicDDPTrainer:
         self.data_iter = iter(train_dataloader)
 
         # Optimizer and scheduler
-        base_optimizer = AdamW(
+        self.optimizer = AdamW(
             self.model.parameters(),
             lr=config.learning_rate,
             weight_decay=config.weight_decay,
             betas=(0.9, 0.95),
         )
 
-        # Wrap with OrthogonalGrad if enabled (arXiv:2501.04697v2)
-        # Projects out weight-aligned gradients for immediate generalization
-        if config.use_orthogonal_grad and ORTHOGONAL_GRAD_AVAILABLE:
-            self.optimizer = OrthogonalGradWrapper(
-                base_optimizer,
-                self.model,
-                projection_strength=config.orthogonal_grad_strength,
-            )
-            print(f"⊥Grad optimizer enabled (strength: {config.orthogonal_grad_strength})")
-        else:
-            self.optimizer = base_optimizer
-            if config.use_orthogonal_grad and not ORTHOGONAL_GRAD_AVAILABLE:
-                print("Warning: OrthogonalGrad requested but not available")
+        # Track orthogonal grad settings for use in _optimizer_step
+        self.use_orthogonal_grad = config.use_orthogonal_grad and ORTHOGONAL_GRAD_AVAILABLE
+        self.orthogonal_grad_strength = config.orthogonal_grad_strength
+        if self.use_orthogonal_grad:
+            print(f"⊥Grad projection enabled (strength: {config.orthogonal_grad_strength})")
+        elif config.use_orthogonal_grad and not ORTHOGONAL_GRAD_AVAILABLE:
+            print("Warning: ⊥Grad requested but not available")
 
         self.scheduler = CosineAnnealingLR(
-            self.optimizer if not hasattr(self.optimizer, 'optimizer') else self.optimizer.optimizer,
+            self.optimizer,
             T_max=config.max_steps - config.warmup_steps,
             eta_min=config.learning_rate * 0.1,
         )
@@ -519,12 +513,17 @@ class EpisodicDDPTrainer:
         return metrics
 
     def _optimizer_step(self) -> Dict[str, float]:
-        """Execute optimizer step with gradient clipping."""
+        """Execute optimizer step with gradient clipping and optional ⊥Grad projection."""
         # Gradient clipping
         grad_norm = torch.nn.utils.clip_grad_norm_(
             self.model.parameters(),
             self.config.grad_clip,
         )
+
+        # Apply orthogonal gradient projection (arXiv:2501.04697v2)
+        # Removes weight-aligned gradient components to prevent NLM
+        if self.use_orthogonal_grad:
+            apply_orthogonal_projection(self.model, strength=self.orthogonal_grad_strength)
 
         # Update weights
         self.optimizer.step()
