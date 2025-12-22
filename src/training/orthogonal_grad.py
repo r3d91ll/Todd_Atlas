@@ -1,5 +1,5 @@
 """
-Orthogonal Gradient Projection (⊥Grad) - Prevents Naïve Loss Minimization.
+Orthogonal Gradient Projection (PerpGrad) - Prevents Naive Loss Minimization.
 
 Based on "Grokking at the Edge of Numerical Stability" (arXiv:2501.04697v2)
 by Darshil Doshi, Tianyu He, Aritra Das, Andrey Gromov.
@@ -7,10 +7,10 @@ by Darshil Doshi, Tianyu He, Aritra Das, Andrey Gromov.
 Key insight: After memorization, gradients align with weights, causing the
 model to simply scale up logits rather than learn generalizing features.
 By projecting out the weight-aligned component, the model is forced to find
-other ways to reduce loss → immediate generalization without delayed grokking.
+other ways to reduce loss -> immediate generalization without delayed grokking.
 
 Update rule:
-    ∇_⊥L(θ) = ∇L(θ) - (θ^T ∇L(θ) / θ^T θ) * θ
+    grad_perp(w) = grad(w) - (w^T grad(w) / w^T w) * w
 
 Usage:
     loss.backward()
@@ -36,7 +36,7 @@ def apply_orthogonal_projection(
     Project out weight-aligned gradient components from all parameters.
 
     This removes the gradient component in the weight direction, preventing
-    naïve loss minimization through weight scaling.
+    naive loss minimization through weight scaling.
 
     Args:
         model: Model with gradients computed (.backward() already called)
@@ -59,8 +59,8 @@ def apply_orthogonal_projection(
         if weight_norm_sq < 1e-10:
             continue  # Skip near-zero weights
 
-        # Compute projection coefficient: (θ^T ∇L) / (θ^T θ)
+        # Compute projection coefficient: (w^T grad) / (w^T w)
         proj_coeff = (grad_flat * weight_flat).sum() / weight_norm_sq
 
-        # Remove weight-aligned component: ∇_⊥L = ∇L - coeff * θ
+        # Remove weight-aligned component: grad_perp = grad - coeff * w
         param.grad -= strength * proj_coeff * param.data

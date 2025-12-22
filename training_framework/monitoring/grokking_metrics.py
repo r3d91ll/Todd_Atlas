@@ -409,7 +409,7 @@ class GrokkingDetector:
             U, S, Vh = np.linalg.svd(W, full_matrices=False)
 
             # Effective rank via entropy of normalized singular values
-            # Formula: exp(-Σ(p_i * log(p_i))) where p_i = σ_i / Σσ
+            # Formula: exp(-sum(p_i * log(p_i))) where p_i = s_i / sum(s)
             # Range: 1 (single dominant SV) to n (uniform spectrum)
             S_norm = S / (np.sum(S) + 1e-10)
             entropy = -np.sum(S_norm * np.log(S_norm + 1e-10))

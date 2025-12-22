@@ -735,7 +735,7 @@ After 100% train accuracy, gradients align with weight direction:
 
 **Solutions (available in this codebase):**
 - **StableMax**: Numerically stable softmax replacement
-- **⊥Grad Optimizer**: Projects out weight-aligned gradients → immediate generalization
+- **PerpGrad Optimizer**: Projects out weight-aligned gradients -> immediate generalization
 
 **References:**
 - Doshi et al. (2025): "Grokking at the Edge of Numerical Stability" (arXiv:2501.04697v2)

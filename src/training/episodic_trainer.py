@@ -152,7 +152,7 @@ class TrainerConfig:
     # Numerical stability options (arXiv:2501.04697v2)
     # StableMax: Numerically stable softmax alternative
     use_stablemax: bool = True  # Use StableCrossEntropyLoss instead of F.cross_entropy
-    # ⊥Grad: Project out weight-aligned gradients for immediate generalization
+    # PerpGrad: Project out weight-aligned gradients for immediate generalization
     use_orthogonal_grad: bool = True
     orthogonal_grad_strength: float = 1.0  # 0.0 = disabled, 1.0 = full projection
 
@@ -224,9 +224,9 @@ class EpisodicDDPTrainer:
         self.use_orthogonal_grad = config.use_orthogonal_grad and ORTHOGONAL_GRAD_AVAILABLE
         self.orthogonal_grad_strength = config.orthogonal_grad_strength
         if self.use_orthogonal_grad:
-            print(f"⊥Grad projection enabled (strength: {config.orthogonal_grad_strength})")
+            print(f"PerpGrad projection enabled (strength: {config.orthogonal_grad_strength})")
         elif config.use_orthogonal_grad and not ORTHOGONAL_GRAD_AVAILABLE:
-            print("Warning: ⊥Grad requested but not available")
+            print("Warning: PerpGrad requested but not available")
 
         self.scheduler = CosineAnnealingLR(
             self.optimizer,
@@ -513,7 +513,7 @@ class EpisodicDDPTrainer:
         return metrics
 
     def _optimizer_step(self) -> Dict[str, float]:
-        """Execute optimizer step with gradient clipping and optional ⊥Grad projection."""
+        """Execute optimizer step with gradient clipping and optional PerpGrad projection."""
         # Gradient clipping
         grad_norm = torch.nn.utils.clip_grad_norm_(
             self.model.parameters(),

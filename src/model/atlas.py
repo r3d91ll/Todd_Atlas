@@ -2,7 +2,7 @@
 Atlas model: Full assembly following Miras framework.
 
 Architecture per block:
-    Input → Memory → Attention → Gate → FFN → Output
+    Input -> Memory -> Attention -> Gate -> FFN -> Output
 
 Memory and Attention run in parallel, combined via learned gate.
 This follows the MAG (Memory as Gating) variant from Titans.
@@ -67,10 +67,10 @@ class AtlasBlock(nn.Module):
     Single Atlas transformer block.
 
     Structure:
-        1. LayerNorm → Memory → Retention penalty
-        2. LayerNorm → Sliding Window Attention
+        1. LayerNorm -> Memory -> Retention penalty
+        2. LayerNorm -> Sliding Window Attention
         3. Gate(memory_out, attention_out)
-        4. Residual + LayerNorm → FFN → Residual
+        4. Residual + LayerNorm -> FFN -> Residual
 
     Args:
         config: AtlasConfig
@@ -226,7 +226,7 @@ class Atlas(nn.Module):
     Full Atlas language model.
 
     Architecture:
-        Token Embedding → Positional Encoding → N × AtlasBlock → LM Head
+        Token Embedding -> Positional Encoding -> N x AtlasBlock -> LM Head
 
     Uses weight tying between embedding and LM head.
 
