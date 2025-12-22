@@ -239,8 +239,9 @@ def collate_multi_task(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
             padded_labels.append(labels)
         result['labels'] = torch.stack(padded_labels)
 
-    if 'answer' in batch[0]:
-        # Only math batches have 'answer'
+    # Check if ANY item has 'answer' (math samples have it, language samples don't)
+    has_answer = any('answer' in item for item in batch)
+    if has_answer:
         # Get dtype from first available answer for consistency
         answer_dtype = next(
             (item['answer'].dtype for item in batch if 'answer' in item),
