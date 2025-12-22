@@ -65,7 +65,7 @@ class TestMasking:
             ])
         }
 
-        masked_batch, mask_positions, original_tokens = create_masked_batch(
+        _masked_batch, mask_positions, _original_tokens = create_masked_batch(
             batch,
             mask_token_id=99,
             num_masks=1,
@@ -131,7 +131,7 @@ class TestMasking:
             'answer': torch.tensor([[68], [30]]),
         }
 
-        masked_batch, mask_positions, original_tokens = create_math_masked_batch(
+        masked_batch, mask_positions, _original_tokens = create_math_masked_batch(
             batch,
             mask_token_id=99,
         )
@@ -328,7 +328,7 @@ class TestIntegration:
         rare_masked = 0
 
         for seed in range(100):
-            _, positions, tokens = create_masked_batch(
+            _, _positions, tokens = create_masked_batch(
                 batch,
                 mask_token_id=99,
                 num_masks=1,

@@ -488,15 +488,15 @@ class GrokkingDetector:
         # Compute trends (Fourier/Circular meaningful for MATH, noise for language)
         fourier_trend = self._compute_trend([m.embedding_fourier_concentration for m in recent])
         circular_trend = self._compute_trend([m.embedding_circular_fit for m in recent])
-        dim_trend = self._compute_trend([m.embedding_effective_dim_ratio for m in recent])
+        # dim_trend reserved for future use
+        _dim_trend = self._compute_trend([m.embedding_effective_dim_ratio for m in recent])
 
         # Multi-task: Use MATH accuracy as primary grokking signal
         # Fourier/Circular are meaningful for mod arithmetic, not language
+        # masked_word_accuracy tracked separately but not used for phase detection
         math_acc = 0.0
-        masked_word_acc = 0.0
         if task_metrics:
             math_acc = task_metrics.get("math_accuracy", 0)
-            masked_word_acc = task_metrics.get("masked_word_accuracy", 0)
 
         # Fallback to legacy retrieval accuracy
         retrieval_acc = val_metrics.get("retrieval_accuracy", 0) if val_metrics else 0
@@ -528,7 +528,7 @@ class GrokkingDetector:
         elif not gate_healthy:
             # Gate collapse - model is bypassing memory, stuck in attention-only mode
             return "gate_collapse"
-        elif (high_math or high_retrieval) or structure_improving:
+        elif high_math or high_retrieval:
             return "cleanup"
         elif structure_improving:
             return "circuit_formation"

@@ -41,8 +41,8 @@ def create_masked_batch(
         mask_positions: [batch_size, num_masks] positions that were masked
         original_tokens: [batch_size, num_masks] original tokens at masked positions
     """
-    if seed is not None:
-        random.seed(seed)
+    # Use local Random instance to avoid mutating global random state
+    rng = random.Random(seed) if seed is not None else random.Random()
 
     input_ids = batch['input_ids'].clone()
     batch_size, seq_len = input_ids.shape
@@ -59,7 +59,7 @@ def create_masked_batch(
 
         if len(valid_positions) >= num_masks:
             # Randomly select positions (no heuristics!)
-            selected = random.sample(valid_positions, num_masks)
+            selected = rng.sample(valid_positions, num_masks)
             for k, pos in enumerate(selected):
                 mask_positions[i, k] = pos
                 original_tokens[i, k] = input_ids[i, pos].clone()

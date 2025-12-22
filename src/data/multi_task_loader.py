@@ -55,7 +55,7 @@ class MultiTaskDataset(Dataset):
         # Create indices with proper mixing
         self.indices = self._create_mixed_indices()
 
-        print(f"MultiTaskDataset initialized:")
+        print("MultiTaskDataset initialized:")
         print(f"  Language samples: {len(language_dataset)}")
         print(f"  Math samples: {len(math_dataset)}")
         print(f"  Math fraction: {math_fraction:.0%}")
@@ -241,7 +241,15 @@ def collate_multi_task(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     if 'answer' in batch[0]:
         # Only math batches have 'answer'
-        answers = [item.get('answer', torch.tensor([-1])) for item in batch]
+        # Get dtype from first available answer for consistency
+        answer_dtype = next(
+            (item['answer'].dtype for item in batch if 'answer' in item),
+            torch.long
+        )
+        answers = [
+            item.get('answer', torch.tensor([-1], dtype=answer_dtype))
+            for item in batch
+        ]
         result['answer'] = torch.stack(answers)
 
     return result

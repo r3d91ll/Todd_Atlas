@@ -572,7 +572,7 @@ class EpisodicDDPTrainer:
         Fourier/Circular geometric metrics apply to this task.
         """
         # Create masked version (answer always at last position)
-        masked_batch, mask_positions, original_tokens = create_math_masked_batch(
+        masked_batch, _mask_positions, _original_tokens = create_math_masked_batch(
             batch,
             mask_token_id=self.ep_config.mask_token_id,
         )
