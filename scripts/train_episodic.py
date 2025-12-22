@@ -311,6 +311,9 @@ def create_trainer_config(config: dict) -> TrainerConfig:
     # Get grokking config
     grokking_cfg = monitoring_cfg.get('grokking', {})
 
+    # Get stability config (arXiv:2501.04697v2)
+    stability_cfg = monitoring_cfg.get('stability', {})
+
     return TrainerConfig(
         max_steps=int(training_cfg.get('max_steps', 5000)),
         learning_rate=float(training_cfg.get('learning_rate', 3e-4)),
@@ -333,6 +336,10 @@ def create_trainer_config(config: dict) -> TrainerConfig:
         telegram_chat_id=str(telegram_cfg.get('chat_id', '')),
         grokking_enabled=bool(grokking_cfg.get('enabled', False)),
         grokking_interval=int(grokking_cfg.get('metrics_interval', 500)),
+        # Numerical stability options (arXiv:2501.04697v2)
+        use_stablemax=bool(stability_cfg.get('use_stablemax', True)),
+        use_orthogonal_grad=bool(stability_cfg.get('use_orthogonal_grad', True)),
+        orthogonal_grad_strength=float(stability_cfg.get('orthogonal_grad_strength', 1.0)),
     )
 
 

@@ -44,6 +44,30 @@ try:
 except ImportError:
     GROKKING_AVAILABLE = False
 
+# Import numerical stability metrics (optional)
+try:
+    from training_framework.monitoring.numerical_stability import (
+        NumericalStabilityMonitor,
+        NumericalStabilityMetrics,
+    )
+    STABILITY_AVAILABLE = True
+except ImportError:
+    STABILITY_AVAILABLE = False
+
+# Import StableMax loss (arXiv:2501.04697v2)
+try:
+    from .stablemax import StableCrossEntropyLoss
+    STABLEMAX_AVAILABLE = True
+except ImportError:
+    STABLEMAX_AVAILABLE = False
+
+# Import orthogonal gradient projection (arXiv:2501.04697v2)
+try:
+    from .orthogonal_grad import apply_orthogonal_projection
+    ORTHOGONAL_GRAD_AVAILABLE = True
+except ImportError:
+    ORTHOGONAL_GRAD_AVAILABLE = False
+
 
 class TrainingPhase(Enum):
     """Training phase for gate floor scheduling."""
@@ -125,6 +149,13 @@ class TrainerConfig:
     grokking_enabled: bool = False
     grokking_interval: int = 500
 
+    # Numerical stability options (arXiv:2501.04697v2)
+    # StableMax: Numerically stable softmax alternative
+    use_stablemax: bool = True  # Use StableCrossEntropyLoss instead of F.cross_entropy
+    # PerpGrad: Project out weight-aligned gradients for immediate generalization
+    use_orthogonal_grad: bool = True
+    orthogonal_grad_strength: float = 1.0  # 0.0 = disabled, 1.0 = full projection
+
 
 class EpisodicDDPTrainer:
     """
@@ -188,11 +219,29 @@ class EpisodicDDPTrainer:
             weight_decay=config.weight_decay,
             betas=(0.9, 0.95),
         )
+
+        # Track orthogonal grad settings for use in _optimizer_step
+        self.use_orthogonal_grad = config.use_orthogonal_grad and ORTHOGONAL_GRAD_AVAILABLE
+        self.orthogonal_grad_strength = config.orthogonal_grad_strength
+        if self.use_orthogonal_grad:
+            print(f"PerpGrad projection enabled (strength: {config.orthogonal_grad_strength})")
+        elif config.use_orthogonal_grad and not ORTHOGONAL_GRAD_AVAILABLE:
+            print("Warning: PerpGrad requested but not available")
+
         self.scheduler = CosineAnnealingLR(
             self.optimizer,
             T_max=config.max_steps - config.warmup_steps,
             eta_min=config.learning_rate * 0.1,
         )
+
+        # StableMax loss criterion (arXiv:2501.04697v2)
+        # Numerically stable alternative to softmax that prevents collapse
+        self.criterion = None
+        if config.use_stablemax and STABLEMAX_AVAILABLE:
+            self.criterion = StableCrossEntropyLoss(ignore_index=-100)
+            print("StableMax loss enabled")
+        elif config.use_stablemax and not STABLEMAX_AVAILABLE:
+            print("Warning: StableMax requested but not available, using F.cross_entropy")
 
         # Retrieval verification
         self.retrieval_verifier = RetrievalVerifier(
@@ -242,6 +291,15 @@ class EpisodicDDPTrainer:
             )
             self.grokking_detector = GrokkingDetector(grok_config)
             print(f"Grokking detection enabled (interval: {config.grokking_interval} steps)")
+
+        # Numerical stability monitor (optional)
+        # Based on arXiv:2501.04697v2 "Grokking at the Edge of Numerical Stability"
+        self.stability_monitor = None
+        self._last_stability_metrics = None
+        self._last_logits = None  # Cache logits for stability analysis
+        if STABILITY_AVAILABLE and config.grokking_enabled:  # Use same flag as grokking
+            self.stability_monitor = NumericalStabilityMonitor()
+            print("Numerical stability monitoring enabled")
 
         # Initialize gate floor
         self._update_gate_floor()
@@ -354,14 +412,20 @@ class EpisodicDDPTrainer:
                 return_metrics=True,
             )
 
-            # Standard LM loss
+            # Standard LM loss (use StableMax if enabled)
             shift_logits = logits[:, :-1, :].contiguous()
             shift_labels = labels[:, 1:].contiguous()
-            loss = F.cross_entropy(
-                shift_logits.view(-1, shift_logits.size(-1)),
-                shift_labels.view(-1),
-                ignore_index=-100,
-            )
+            if self.criterion is not None:
+                loss = self.criterion(
+                    shift_logits.view(-1, shift_logits.size(-1)),
+                    shift_labels.view(-1),
+                )
+            else:
+                loss = F.cross_entropy(
+                    shift_logits.view(-1, shift_logits.size(-1)),
+                    shift_labels.view(-1),
+                    ignore_index=-100,
+                )
             loss = loss * self.ep_config.storage_loss_weight
 
         # Record storage for verification
@@ -376,6 +440,9 @@ class EpisodicDDPTrainer:
         # Backward
         scaled_loss = loss / self.config.gradient_accumulation_steps
         scaled_loss.backward()
+
+        # Cache logits for stability analysis (detach to avoid memory leak)
+        self._last_logits = logits.detach()
 
         return {
             'loss': loss.item(),
@@ -403,14 +470,20 @@ class EpisodicDDPTrainer:
                 return_metrics=True,
             )
 
-            # Standard LM loss
+            # Standard LM loss (use StableMax if enabled)
             shift_logits = logits[:, :-1, :].contiguous()
             shift_labels = labels[:, 1:].contiguous()
-            lm_loss = F.cross_entropy(
-                shift_logits.view(-1, shift_logits.size(-1)),
-                shift_labels.view(-1),
-                ignore_index=-100,
-            )
+            if self.criterion is not None:
+                lm_loss = self.criterion(
+                    shift_logits.view(-1, shift_logits.size(-1)),
+                    shift_labels.view(-1),
+                )
+            else:
+                lm_loss = F.cross_entropy(
+                    shift_logits.view(-1, shift_logits.size(-1)),
+                    shift_labels.view(-1),
+                    ignore_index=-100,
+                )
 
         # Compute retrieval loss and verification
         batch_hash = self._compute_batch_hash(batch)
@@ -428,6 +501,10 @@ class EpisodicDDPTrainer:
         scaled_loss = total_loss / self.config.gradient_accumulation_steps
         scaled_loss.backward()
 
+        # Cache logits for stability analysis (detach to avoid memory leak)
+        # Must be set in both storage and retrieval steps for fresh metrics
+        self._last_logits = logits.detach()
+
         metrics = {
             'loss': total_loss.item(),
             'lm_loss': lm_loss.item(),
@@ -440,12 +517,17 @@ class EpisodicDDPTrainer:
         return metrics
 
     def _optimizer_step(self) -> Dict[str, float]:
-        """Execute optimizer step with gradient clipping."""
+        """Execute optimizer step with gradient clipping and optional PerpGrad projection."""
         # Gradient clipping
         grad_norm = torch.nn.utils.clip_grad_norm_(
             self.model.parameters(),
             self.config.grad_clip,
         )
+
+        # Apply orthogonal gradient projection (arXiv:2501.04697v2)
+        # Removes weight-aligned gradient components to prevent NLM
+        if self.use_orthogonal_grad:
+            apply_orthogonal_projection(self.model, strength=self.orthogonal_grad_strength)
 
         # Update weights
         self.optimizer.step()
@@ -592,6 +674,33 @@ class EpisodicDDPTrainer:
             elif self._last_grokking_metrics is not None:
                 # Include last computed grokking phase in metrics
                 metrics['grokking/phase'] = self._last_grokking_metrics.phase
+
+        # Numerical stability metrics (computed at same interval as grokking)
+        # Based on arXiv:2501.04697v2 "Grokking at the Edge of Numerical Stability"
+        if self.stability_monitor is not None:
+            if self.global_step % self.config.grokking_interval == 0:
+                stability_metrics = self.stability_monitor.compute_metrics(
+                    model=model,
+                    logits=self._last_logits,
+                    step=self.global_step,
+                )
+                self._last_stability_metrics = stability_metrics
+                metrics.update(stability_metrics.to_dict())
+
+                # Log stability warnings
+                if stability_metrics.sc_risk in ('high', 'critical'):
+                    print(
+                        f"  [Stability] ⚠️ SC Risk: {stability_metrics.sc_risk} | "
+                        f"SC Fraction: {stability_metrics.sc_fraction:.1%} | "
+                        f"Max Logit: {stability_metrics.max_logit_mean:.1f}"
+                    )
+                if stability_metrics.nlm_active:
+                    print(
+                        f"  [Stability] ⚠️ NLM Active: Grad-Weight Cosine = {stability_metrics.grad_weight_cosine:.3f}"
+                    )
+            elif self._last_stability_metrics is not None:
+                # Include last computed stability risk in metrics
+                metrics['stability/sc_risk'] = self._last_stability_metrics.sc_risk
 
         return metrics
 

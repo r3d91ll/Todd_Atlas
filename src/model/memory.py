@@ -7,12 +7,12 @@ Matrix-valued memory module following Behrouz et al. papers:
 - Nested Learning: Multi-frequency update dynamics
 
 Core equations (from Titans):
-    S_t = η_t · S_{t-1} - θ_t · ∇ℓ(M_{t-1}; k_t, v_t)   # Surprise accumulation
-    M_t = (1 - α_t) · M_{t-1} + S_t                      # Memory update with decay
+    S_t = eta_t * S_{t-1} - theta_t * grad_loss(M_{t-1}; k_t, v_t)  # Surprise accumulation
+    M_t = (1 - alpha_t) * M_{t-1} + S_t                             # Memory update with decay
 
 Key insights:
-    - α_t, η_t, θ_t are INPUT-DEPENDENT (functions of x_t)
-    - Memory has explicit forgetting via (1 - α_t) decay
+    - alpha_t, eta_t, theta_t are INPUT-DEPENDENT (functions of x_t)
+    - Memory has explicit forgetting via (1 - alpha_t) decay
     - Surprise accumulates momentum of gradients
     - Q-K projection aligns query space to key space (TNT)
 """
@@ -28,10 +28,10 @@ class TitansMemory(nn.Module):
     Titans-style matrix memory with surprise-based updates.
 
     Implements the correct update equations:
-        S_t = η_t · S_{t-1} - θ_t · ∇ℓ(M_{t-1}; k_t, v_t)
-        M_t = (1 - α_t) · M_{t-1} + S_t
+        S_t = eta_t * S_{t-1} - theta_t * grad_loss(M_{t-1}; k_t, v_t)
+        M_t = (1 - alpha_t) * M_{t-1} + S_t
 
-    Where α_t, η_t, θ_t are input-dependent via linear projections.
+    Where alpha_t, eta_t, theta_t are input-dependent via linear projections.
 
     Args:
         d_model: Model dimension (input dimension)
@@ -76,16 +76,16 @@ class TitansMemory(nn.Module):
         self.qk_proj = nn.Linear(d_key, d_key, bias=False)
 
         # Input-dependent parameter generators (Titans insight)
-        # These produce per-token α, η, θ values
+        # These produce per-token alpha, eta, theta values
         # Use sigmoid to bound outputs to [0, 1]
 
-        # α_t: Forgetting gate - how much to decay memory (0 = full retain, 1 = full forget)
+        # alpha_t: Forgetting gate - how much to decay memory (0 = full retain, 1 = full forget)
         self.alpha_proj = nn.Linear(d_model, 1, bias=True)
 
-        # η_t: Surprise decay - how much past surprise to retain (0 = no momentum, 1 = full momentum)
+        # eta_t: Surprise decay - how much past surprise to retain (0 = no momentum, 1 = full momentum)
         self.eta_proj = nn.Linear(d_model, 1, bias=True)
 
-        # θ_t: Gradient scaling - how strongly current gradient affects surprise
+        # theta_t: Gradient scaling - how strongly current gradient affects surprise
         self.theta_proj = nn.Linear(d_model, 1, bias=True)
 
         # Initialize projection biases to achieve desired initial values
@@ -168,11 +168,11 @@ class TitansMemory(nn.Module):
         M: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
-    ) -> torch.Tensor:
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Compute gradient of L2 attentional bias: ℓ(M; k, v) = ||M·k - v||²
+        Compute gradient of L2 attentional bias: loss(M; k, v) = ||M*k - v||^2
 
-        ∇_M ℓ = 2(M·k - v)·k^T
+        grad_M loss = 2(M*k - v)*k^T
 
         Args:
             M: Memory [batch, d_key, d_value]
@@ -181,6 +181,7 @@ class TitansMemory(nn.Module):
 
         Returns:
             grad: Gradient [batch, d_key, d_value]
+            error: Prediction error [batch, d_value, seq]
         """
         batch_size, seq_len, _ = k.shape
 
@@ -210,8 +211,8 @@ class TitansMemory(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor, dict]:
         """
         Update memory using Titans equations:
-            S_t = η_t · S_{t-1} - θ_t · ∇ℓ(M_{t-1}; k_t, v_t)
-            M_t = (1 - α_t) · M_{t-1} + S_t
+            S_t = eta_t * S_{t-1} - theta_t * grad_loss(M_{t-1}; k_t, v_t)
+            M_t = (1 - alpha_t) * M_{t-1} + S_t
 
         Args:
             M: Current memory [batch, d_key, d_value]
@@ -255,13 +256,13 @@ class TitansMemory(nn.Module):
         grad = self._clip_state_norm(grad, self.grad_clip)
 
         # Titans update equations:
-        # S_t = η_t · S_{t-1} - θ_t · ∇ℓ
+        # S_t = eta_t * S_{t-1} - theta_t * grad_loss
         S_new = eta_t * S - theta_t * grad
 
         # STABILITY: Clip surprise norm
         S_new = self._clip_state_norm(S_new, self.surprise_max_norm)
 
-        # M_t = (1 - α_t) · M_{t-1} + S_t
+        # M_t = (1 - alpha_t) * M_{t-1} + S_t
         M_new = (1 - alpha_t) * M + S_new
 
         # STABILITY: Clip memory norm
@@ -480,8 +481,9 @@ class ChunkedTitansMemory(TitansMemory):
         # Concatenate outputs
         output = torch.cat(outputs, dim=1)
 
-        # For gradient computation, we need the final non-detached state
-        # Re-run last chunk without detach for proper gradients
+        # For gradient computation on the final state, re-run the last chunk
+        # without detaching its output. This allows gradients to flow through
+        # the last chunk's update, but not back to previous chunks (TNT approach).
         if len(chunks) > 0:
             last_chunk = chunks[-1]
             # Use second-to-last state (or initial if only one chunk)

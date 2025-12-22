@@ -20,10 +20,10 @@ class RetentionGate(nn.Module):
     Retention gate with local and global components.
 
     Learning-Retaining objective:
-        W_t = argmin_W [ℓ(W; k_t, v_t) + Ret_t(W, W_{t-1})]
+        W_t = argmin_W [loss(W; k_t, v_t) + Ret_t(W, W_{t-1})]
 
     Where:
-        Ret_t = λ_local · ||W - W_{t-1}||²_F + λ_global · ||W||²_F
+        Ret_t = lam_local * ||W - W_{t-1}||_F^2 + lam_global * ||W||_F^2
 
     The gradient of this retention term is added to the memory update.
 
@@ -84,10 +84,10 @@ class RetentionGate(nn.Module):
         Compute gradient of retention penalty w.r.t. W.
 
         Retention penalty:
-            Ret = λ_local · ||W - W_prev||²_F + λ_global · ||W||²_F
+            Ret = lam_local * ||W - W_prev||_F^2 + lam_global * ||W||_F^2
 
         Gradient:
-            ∂Ret/∂W = 2·λ_local·(W - W_prev) + 2·λ_global·W
+            dRet/dW = 2*lam_local*(W - W_prev) + 2*lam_global*W
 
         Args:
             W: Current memory [batch, d_key, d_value]
@@ -97,25 +97,25 @@ class RetentionGate(nn.Module):
             grad: Retention penalty gradient [batch, d_key, d_value]
             metrics: Observable metrics
         """
-        λ_local = self.lambda_local
-        λ_global = self.lambda_global
+        lam_local = self.lambda_local
+        lam_global = self.lambda_global
 
         # Local retention gradient: pull toward previous state
-        local_grad = 2 * λ_local * (W - W_prev)
+        local_grad = 2 * lam_local * (W - W_prev)
 
         # Global retention gradient: regularize magnitude
-        global_grad = 2 * λ_global * W
+        global_grad = 2 * lam_global * W
 
         # Combined gradient
         grad = local_grad + global_grad
 
         # Compute actual penalty values for logging
-        local_penalty = λ_local * (W - W_prev).pow(2).sum(dim=(-2, -1)).mean()
-        global_penalty = λ_global * W.pow(2).sum(dim=(-2, -1)).mean()
+        local_penalty = lam_local * (W - W_prev).pow(2).sum(dim=(-2, -1)).mean()
+        global_penalty = lam_global * W.pow(2).sum(dim=(-2, -1)).mean()
 
         metrics = {
-            "lambda_local": λ_local.item(),
-            "lambda_global": λ_global.item(),
+            "lambda_local": lam_local.item(),
+            "lambda_global": lam_global.item(),
             "local_penalty": local_penalty.item(),
             "global_penalty": global_penalty.item(),
             "total_penalty": (local_penalty + global_penalty).item(),
@@ -228,21 +228,21 @@ class AdaptiveRetentionGate(RetentionGate):
         local_coef, global_coef = self.compute_adaptive_coefficients(x)
 
         # Average over sequence for single coefficient per sample
-        λ_local = local_coef.mean(dim=1, keepdim=True).squeeze(-1)  # [batch, 1]
-        λ_global = global_coef.mean(dim=1, keepdim=True).squeeze(-1)
+        lam_local = local_coef.mean(dim=1, keepdim=True).squeeze(-1)  # [batch, 1]
+        lam_global = global_coef.mean(dim=1, keepdim=True).squeeze(-1)
 
         # Reshape for broadcasting
-        λ_local = λ_local.unsqueeze(-1)  # [batch, 1, 1]
-        λ_global = λ_global.unsqueeze(-1)
+        lam_local = lam_local.unsqueeze(-1)  # [batch, 1, 1]
+        lam_global = lam_global.unsqueeze(-1)
 
         # Compute gradients
-        local_grad = 2 * λ_local * (W - W_prev)
-        global_grad = 2 * λ_global * W
+        local_grad = 2 * lam_local * (W - W_prev)
+        global_grad = 2 * lam_global * W
         grad = local_grad + global_grad
 
         metrics = {
-            "lambda_local_mean": λ_local.mean().item(),
-            "lambda_global_mean": λ_global.mean().item(),
+            "lambda_local_mean": lam_local.mean().item(),
+            "lambda_global_mean": lam_global.mean().item(),
             "lambda_local_std": local_coef.std().item(),
             "lambda_global_std": global_coef.std().item(),
             "retention_grad_norm": grad.norm(dim=(-2, -1)).mean().item(),

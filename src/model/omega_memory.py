@@ -4,17 +4,17 @@ Atlas Memory with Omega Rule and Polynomial Features.
 Implements the proper Atlas update equations from arXiv:2505.23735v1:
 
 Omega Rule Objective (Equation 9):
-    min_M Σ(i=t-c+1 to t) γᵢ(t) ||M(ϕ(kᵢ)) - vᵢ||²₂
+    min_M sum(i=t-c+1 to t) gamma_i(t) ||M(phi(k_i)) - v_i||_2^2
 
 Update Equations (Equation 11-13):
-    Mₜ = αₜMₜ₋₁ + Sₜ
-    Sₜ = θₜSₜ₋₁ - ηₜ∇ℓ(Mₜ₋₁; context_window)
+    M_t = alpha_t * M_{t-1} + S_t
+    S_t = theta_t * S_{t-1} - eta_t * grad_loss(M_{t-1}; context_window)
 
 Key components:
-    - Polynomial feature mapping ϕₚ(k) with coefficients aᵢ = 1/i!
+    - Polynomial feature mapping phi_p(k) with coefficients a_i = 1/i!
     - Context window optimization (not single-token)
     - Input-dependent gamma gates for selective token inclusion
-    - Self-stabilizing update dynamics via ϕ(k)ϕ(k)ᵀ damping
+    - Self-stabilizing update dynamics via phi(k)phi(k)^T damping
 """
 
 import math
@@ -50,12 +50,12 @@ class OmegaMemoryConfig:
 
 class PolynomialFeatures(nn.Module):
     """
-    Polynomial feature mapping ϕₚ(x) = [xᵝ]_{|β|≤p}.
+    Polynomial feature mapping phi_p(x) = [x^beta]_{|beta|<=p}.
 
     For efficiency, we use a simplified version that computes:
-    ϕ(x) = a₀ + a₁x + a₂x² + ... + aₚxᵖ (element-wise)
+    phi(x) = a_0 + a_1*x + a_2*x^2 + ... + a_p*x^p (element-wise)
 
-    With coefficients initialized as aᵢ = 1/i! (Taylor expansion of exp).
+    With coefficients initialized as a_i = 1/i! (Taylor expansion of exp).
 
     This provides O(d^p) effective capacity while keeping computation tractable.
     """
@@ -88,14 +88,14 @@ class PolynomialFeatures(nn.Module):
             x: Input tensor [..., d_input]
 
         Returns:
-            ϕ(x): Polynomial features [..., (degree+1) * d_input]
+            phi(x): Polynomial features [..., (degree+1) * d_input]
         """
-        # Compute powers: x⁰, x¹, x², ..., xᵖ
+        # Compute powers: x^0, x^1, x^2, ..., x^p
         powers = []
-        x_power = torch.ones_like(x)  # x⁰ = 1
+        x_power = torch.ones_like(x)  # x^0 = 1
 
         for i in range(self.degree + 1):
-            # Weight by coefficient aᵢ = 1/i!
+            # Weight by coefficient a_i = 1/i!
             powers.append(self.coeffs[i] * x_power)
             x_power = x_power * x  # x^(i+1)
 
@@ -109,7 +109,7 @@ class PolynomialFeatures(nn.Module):
 
 class ContextGates(nn.Module):
     """
-    Input-dependent context gates γᵢ(t) ∈ [0,1].
+    Input-dependent context gates gamma_i(t) in [0,1].
 
     These gates determine how much each token in the context window
     contributes to the memory update. Enables learned sparse context selection.
@@ -138,14 +138,14 @@ class ContextGates(nn.Module):
         context: torch.Tensor,
     ) -> torch.Tensor:
         """
-        Compute context gates γᵢ(t) for each position in context window.
+        Compute context gates gamma_i(t) for each position in context window.
 
         Args:
             current: Current token [batch, d_model]
             context: Context window [batch, c, d_model]
 
         Returns:
-            gates: γᵢ(t) values [batch, c] in range [0, 1]
+            gates: gamma_i(t) values [batch, c] in range [0, 1]
         """
         batch_size, c, _ = context.shape
 
@@ -171,16 +171,16 @@ class OmegaMemory(nn.Module):
 
     Implements the full Atlas memory update equations:
 
-    1. Polynomial feature expansion: ϕₚ(k) with aᵢ = 1/i!
-    2. Context window optimization: Σ(i=t-c+1 to t) γᵢ ||M·ϕ(kᵢ) - vᵢ||²
+    1. Polynomial feature expansion: phi_p(k) with a_i = 1/i!
+    2. Context window optimization: sum(i=t-c+1 to t) gamma_i ||M*phi(k_i) - v_i||^2
     3. Omega rule update with momentum:
-        Sₜ = θₜSₜ₋₁ - ηₜ∇ℓ
-        Mₜ = αₜMₜ₋₁ + Sₜ
+        S_t = theta_t * S_{t-1} - eta_t * grad_loss
+        M_t = alpha_t * M_{t-1} + S_t
 
     Key stability mechanisms:
     - Polynomial coefficients 1/i! bound growth
-    - ϕ(k)ϕ(k)ᵀ in gradient provides natural damping
-    - Input-dependent α, η, θ adapt to content
+    - phi(k)phi(k)^T in gradient provides natural damping
+    - Input-dependent alpha, eta, theta adapt to content
     """
 
     def __init__(self, config: OmegaMemoryConfig):
@@ -207,11 +207,11 @@ class OmegaMemory(nn.Module):
         self.context_gates = ContextGates(config.d_model, config.context_window)
 
         # Input-dependent parameter generators
-        # α: decay (how much old memory to retain)
+        # alpha: decay (how much old memory to retain)
         self.alpha_proj = nn.Linear(config.d_model, 1, bias=True)
-        # θ: momentum coefficient
+        # theta: momentum coefficient
         self.theta_proj = nn.Linear(config.d_model, 1, bias=True)
-        # η: learning rate for memory update
+        # eta: learning rate for memory update
         self.eta_proj = nn.Linear(config.d_model, 1, bias=True)
 
         # Output projection (from d_value back to d_model)
@@ -307,14 +307,14 @@ class OmegaMemory(nn.Module):
         """
         Compute gradient of Omega rule objective over context window.
 
-        Objective: Σᵢ γᵢ ||M·ϕ(kᵢ) - vᵢ||²
+        Objective: sum_i gamma_i ||M*phi(k_i) - v_i||^2
 
-        Gradient: ∇_M = 2 Σᵢ γᵢ (M·ϕ(kᵢ) - vᵢ) ϕ(kᵢ)ᵀ
+        Gradient: grad_M = 2 sum_i gamma_i (M*phi(k_i) - v_i) phi(k_i)^T
 
         This can be written in matrix form as:
-        ∇_M = 2 (M·Φᵀ·Γ·Φ - V·Γ·Φ)
+        grad_M = 2 (M*Phi^T*Gamma*Phi - V*Gamma*Phi)
 
-        where Φ = [ϕ(k₁), ..., ϕ(kc)]ᵀ and Γ = diag(γ)
+        where Phi = [phi(k_1), ..., phi(k_c)]^T and Gamma = diag(gamma)
 
         Args:
             M: Memory [batch, d_poly, d_value]
@@ -339,8 +339,8 @@ class OmegaMemory(nn.Module):
         # Apply gamma weights: [batch, c, 1] * [batch, c, d_value]
         weighted_error = gamma.unsqueeze(-1) * error  # [batch, c, d_value]
 
-        # Gradient: Σᵢ γᵢ (error_i) @ ϕ(kᵢ)ᵀ
-        # = (gamma * error)ᵀ @ context_k
+        # Gradient: sum_i gamma_i (error_i) @ phi(k_i)^T
+        # = (gamma * error)^T @ context_k
         # weighted_error: [batch, c, d_value], context_k: [batch, c, d_poly]
         grad = torch.bmm(
             context_k.transpose(-1, -2),  # [batch, d_poly, c]
@@ -381,8 +381,8 @@ class OmegaMemory(nn.Module):
         across many update steps.
 
         Omega Rule Update:
-            Sₜ = θₜSₜ₋₁ - ηₜ∇ℓ(Mₜ₋₁; context_window)
-            Mₜ = αₜMₜ₋₁ + Sₜ
+            S_t = theta_t * S_{t-1} - eta_t * grad_loss(M_{t-1}; context_window)
+            M_t = alpha_t * M_{t-1} + S_t
 
         Args:
             M: Current memory [batch, d_poly, d_value]
@@ -421,7 +421,7 @@ class OmegaMemory(nn.Module):
                 # Get the last token for parameter generation
                 x_t = chunk[:, -1, :]  # [batch, d_model]
 
-                # Compute context gates γᵢ(t)
+                # Compute context gates gamma_i(t)
                 gamma = self.context_gates(x_t, chunk)  # [batch, chunk_len]
 
                 # Project to keys and values
@@ -447,10 +447,10 @@ class OmegaMemory(nn.Module):
                 )
 
                 # Omega rule update:
-                # Sₜ = θₜSₜ₋₁ - ηₜ∇ℓ
+                # S_t = theta_t * S_{t-1} - eta_t * grad_loss
                 S_new = theta_t * S_current - eta_t * grad
 
-                # Mₜ = αₜMₜ₋₁ + Sₜ
+                # M_t = alpha_t * M_{t-1} + S_t
                 M_new = alpha_t * M_current + S_new
 
                 # Clip for stability

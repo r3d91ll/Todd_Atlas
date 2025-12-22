@@ -174,7 +174,7 @@ class GrokkingDetector:
                         metrics.memory_fourier_concentration = np.mean([m["fourier_concentration"] for m in layer_metrics])
                         metrics.memory_effective_dim = np.mean([m["effective_dim"] for m in layer_metrics])
                         metrics.memory_effective_dim_ratio = np.mean([m["effective_dim_ratio"] for m in layer_metrics])
-                        metrics.memory_rank = np.mean([m["numerical_rank"] for m in layer_metrics])
+                        metrics.memory_rank = np.mean([m["effective_rank"] for m in layer_metrics])
 
             # 3. Hidden state metrics (if available from forward pass)
             # These would need to be passed in from the training loop
@@ -392,13 +392,13 @@ class GrokkingDetector:
             W: Memory matrix [d_key, d_value]
 
         Returns:
-            Dict with fourier_concentration, effective_dim, numerical_rank
+            Dict with fourier_concentration, effective_dim, effective_rank
         """
         metrics = {
             "fourier_concentration": 0.0,
             "effective_dim": 0,
             "effective_dim_ratio": 0.0,
-            "numerical_rank": 0.0,
+            "effective_rank": 0.0,
         }
 
         try:
@@ -408,11 +408,12 @@ class GrokkingDetector:
             # SVD for rank and effective dimensionality
             U, S, Vh = np.linalg.svd(W, full_matrices=False)
 
-            # Effective rank via entropy of singular values
-            # (Same formula as Memory Adapter - more meaningful than numerical rank)
+            # Effective rank via entropy of normalized singular values
+            # Formula: exp(-sum(p_i * log(p_i))) where p_i = s_i / sum(s)
+            # Range: 1 (single dominant SV) to n (uniform spectrum)
             S_norm = S / (np.sum(S) + 1e-10)
             entropy = -np.sum(S_norm * np.log(S_norm + 1e-10))
-            metrics["numerical_rank"] = float(np.exp(entropy))
+            metrics["effective_rank"] = float(np.exp(entropy))
 
             # Effective dimensionality (cumulative energy)
             energy = S**2

@@ -234,9 +234,9 @@ class DDPTrainer:
         Create parameter groups with different learning rates.
 
         Based on diagnostic analysis:
-        - Retention gates have ~1000x smaller gradients → need higher LR
-        - Memory/attention gates have ~10x smaller gradients → need higher LR
-        - Memory, attention, FFN have similar gradient scales → use base LR
+        - Retention gates have ~1000x smaller gradients -> need higher LR
+        - Memory/attention gates have ~10x smaller gradients -> need higher LR
+        - Memory, attention, FFN have similar gradient scales -> use base LR
 
         LR multipliers tuned based on gradient norm ratios.
         """
