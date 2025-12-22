@@ -477,17 +477,73 @@ class EpisodicDDPTrainer:
         - Heavy penalty for wrong answers
         - Track separate accuracies per task type
         """
-        # Check task type from multi-task loader
-        task_type = batch.get('task_type', 'language')
+        if not self.ep_config.use_masked_retrieval:
+            # Legacy retrieval (original behavior)
+            return self._legacy_retrieval_step(batch)
 
-        if self.ep_config.use_masked_retrieval:
+        # Multi-task: batch may have mixed task types
+        # task_types is a list like ['math', 'language', 'math', ...]
+        task_types = batch.get('task_types', None)
+
+        # If no task_types field, fall back to single task_type or default to language
+        if task_types is None:
+            task_type = batch.get('task_type', 'language')
             if task_type == 'math':
                 return self._math_retrieval_step(batch)
             else:
                 return self._language_retrieval_step(batch)
-        else:
-            # Legacy retrieval (original behavior)
-            return self._legacy_retrieval_step(batch)
+
+        # Split batch by task type and process separately
+        batch_size = batch['input_ids'].size(0)
+        math_indices = [i for i, t in enumerate(task_types) if t == 'math']
+        lang_indices = [i for i, t in enumerate(task_types) if t == 'language']
+
+        combined_loss = 0.0
+        math_accuracy = None
+        masked_word_accuracy = None
+        total_samples = 0
+
+        # Process math samples if any
+        if math_indices:
+            math_batch = self._extract_sub_batch(batch, math_indices)
+            math_result = self._math_retrieval_step(math_batch)
+            combined_loss += math_result['loss'] * len(math_indices)
+            math_accuracy = math_result.get('math_accuracy', 0.0)
+            total_samples += len(math_indices)
+
+        # Process language samples if any
+        if lang_indices:
+            lang_batch = self._extract_sub_batch(batch, lang_indices)
+            lang_result = self._language_retrieval_step(lang_batch)
+            combined_loss += lang_result['loss'] * len(lang_indices)
+            masked_word_accuracy = lang_result.get('masked_word_accuracy', 0.0)
+            total_samples += len(lang_indices)
+
+        # Aggregate results
+        result = {
+            'loss': combined_loss / max(total_samples, 1),
+            'retrieval_loss': combined_loss / max(total_samples, 1),
+            'phase': 'retrieval',
+        }
+
+        if math_accuracy is not None:
+            result['math_accuracy'] = math_accuracy
+        if masked_word_accuracy is not None:
+            result['masked_word_accuracy'] = masked_word_accuracy
+
+        return result
+
+    def _extract_sub_batch(self, batch: Dict[str, Any], indices: list) -> Dict[str, Any]:
+        """Extract a sub-batch containing only the specified indices."""
+        sub_batch = {}
+        for k, v in batch.items():
+            if isinstance(v, torch.Tensor):
+                sub_batch[k] = v[indices]
+            elif isinstance(v, list):
+                sub_batch[k] = [v[i] for i in indices]
+            else:
+                sub_batch[k] = v
+        return sub_batch
 
     def _language_retrieval_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
         """
