@@ -168,7 +168,7 @@ class TitansMemory(nn.Module):
         M: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
-    ) -> torch.Tensor:
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Compute gradient of L2 attentional bias: loss(M; k, v) = ||M*k - v||^2
 
@@ -181,6 +181,7 @@ class TitansMemory(nn.Module):
 
         Returns:
             grad: Gradient [batch, d_key, d_value]
+            error: Prediction error [batch, d_value, seq]
         """
         batch_size, seq_len, _ = k.shape
 
