@@ -114,6 +114,12 @@ def create_dataloader(config: dict, tokenizer=None) -> DataLoader:
     """Create training dataloader."""
     data_cfg = config.get('data', {})
     training_cfg = config.get('training', {})
+    multi_task_cfg = config.get('multi_task', {})
+
+    # Check for multi-task training mode
+    if multi_task_cfg.get('enabled', False):
+        print("Creating multi-task dataloader (language + modular arithmetic)")
+        return create_multi_task_dataloader(config)
 
     # Check if using synthetic data
     if data_cfg.get('use_synthetic', False):
@@ -284,6 +290,144 @@ def create_synthetic_dataloader(
     return DictDataLoader(base_loader)
 
 
+def create_multi_task_dataloader(config: dict) -> DataLoader:
+    """
+    Create multi-task dataloader combining language corpus and modular arithmetic.
+
+    This enables domain universality testing: if grokking on math predicts
+    language performance, we have a universal validation methodology.
+    """
+    from src.data.multi_task_loader import MultiTaskDataset, collate_multi_task
+    from src.data.modular_arithmetic import ModularArithmeticDataset
+    from src.data.loader import DolminoDatasetZstd
+    from torch.utils.data import DataLoader
+    from transformers import AutoTokenizer
+
+    data_cfg = config.get('data', {})
+    training_cfg = config.get('training', {})
+    multi_task_cfg = config.get('multi_task', {})
+
+    batch_size = training_cfg.get('batch_size', 32)
+    max_seq_len = data_cfg.get('max_seq_len', 512)
+
+    # Load tokenizer for language data
+    tokenizer = AutoTokenizer.from_pretrained("google/t5-v1_1-base")
+
+    # Load language dataset from zstd JSONL files
+    dataset_path = data_cfg.get('dataset_path', 'data/shakespeare')
+    print(f"Loading language dataset from: {dataset_path}")
+
+    # Get list of data files
+    data_path = Path(dataset_path)
+    files = sorted(list(data_path.glob("*.jsonl.zst")))
+    if not files:
+        files = sorted(list(data_path.glob("*.jsonl")))
+    if not files:
+        raise ValueError(f"No data files found in {dataset_path}")
+
+    print(f"  Found {len(files)} data files")
+
+    # Create language dataset (wrap iterable as map-style for multi-task mixing)
+    class LanguageDatasetWrapper(torch.utils.data.Dataset):
+        """Wrap streaming dataset as map-style dataset for multi-task mixing."""
+
+        def __init__(self, files, tokenizer, max_seq_len, max_samples=10000):
+            self.tokenizer = tokenizer
+            self.max_seq_len = max_seq_len
+            self.samples = []
+
+            # Load samples into memory (for multi-task mixing)
+            print(f"  Loading language samples (max {max_samples})...")
+            import zstandard as zstd
+            import json
+
+            for file_path in files:
+                if len(self.samples) >= max_samples:
+                    break
+
+                dctx = zstd.ZstdDecompressor()
+                with open(file_path, 'rb') as f:
+                    # Decompress and read line by line
+                    decompressed = dctx.decompress(f.read())
+                    for line in decompressed.decode('utf-8').split('\n'):
+                        if len(self.samples) >= max_samples:
+                            break
+                        if not line.strip():
+                            continue
+                        try:
+                            data = json.loads(line)
+                            text = data.get('text', '')
+                            if text:
+                                tokens = tokenizer.encode(text, add_special_tokens=False)
+                                # Create sliding window samples (smaller step = more samples)
+                                step = min(64, max_seq_len // 4)
+                                for i in range(0, max(1, len(tokens) - max_seq_len), step):
+                                    if len(self.samples) >= max_samples:
+                                        break
+                                    sample = tokens[i:i + max_seq_len]
+                                    if len(sample) == max_seq_len:
+                                        self.samples.append(sample)
+                        except:
+                            continue
+
+            print(f"  Loaded {len(self.samples)} language samples")
+
+        def __len__(self):
+            return len(self.samples)
+
+        def __getitem__(self, idx):
+            tokens = self.samples[idx]
+            return {
+                'input_ids': torch.tensor(tokens, dtype=torch.long),
+                'labels': torch.tensor(tokens, dtype=torch.long),
+                'task_type': 'language',
+            }
+
+    # Use more samples for proper training (but keep memory reasonable)
+    language_dataset = LanguageDatasetWrapper(files, tokenizer, max_seq_len, max_samples=50000)
+
+    # Create modular arithmetic dataset
+    math_prime = multi_task_cfg.get('math_prime', 97)
+    math_operation = multi_task_cfg.get('math_operation', 'add')
+    print(f"Creating modular arithmetic dataset (mod {math_prime}, {math_operation})")
+
+    math_dataset = ModularArithmeticDataset(
+        prime=math_prime,
+        operation=math_operation,
+        split='train',
+        train_fraction=0.5,  # Use 50% of math examples
+    )
+
+    # Create multi-task dataset
+    math_fraction = multi_task_cfg.get('math_fraction', 0.5)
+    random_ordering = multi_task_cfg.get('random_ordering', True)
+
+    multi_dataset = MultiTaskDataset(
+        language_dataset=language_dataset,
+        math_dataset=math_dataset,
+        math_fraction=math_fraction,
+        random_ordering=random_ordering,
+        seed=42,
+    )
+
+    # Create dataloader with custom collate function
+    dataloader = DataLoader(
+        multi_dataset,
+        batch_size=batch_size,
+        shuffle=False,  # Already shuffled by MultiTaskDataset
+        num_workers=data_cfg.get('num_workers', 2),
+        collate_fn=collate_multi_task,
+        pin_memory=True,
+    )
+
+    print(f"Multi-task dataloader created:")
+    print(f"  Total samples: {len(multi_dataset)}")
+    print(f"  Math fraction: {math_fraction:.0%}")
+    print(f"  Random ordering: {random_ordering}")
+
+    return dataloader
+
+
 def create_trainer_config(config: dict) -> TrainerConfig:
     """Create trainer config from YAML config."""
     training_cfg = config.get('training', {})
@@ -302,6 +446,11 @@ def create_trainer_config(config: dict) -> TrainerConfig:
         retrieval_loss_weight=float(episodic_cfg.get('retrieval_loss_weight', 5.0)),
         storage_loss_weight=float(episodic_cfg.get('storage_loss_weight', 1.0)),
         reset_memory_between_episodes=bool(episodic_cfg.get('reset_memory_between_episodes', False)),
+        # Multi-task masked word prediction parameters
+        use_masked_retrieval=bool(episodic_cfg.get('use_masked_retrieval', False)),
+        mask_token_id=int(episodic_cfg.get('mask_token_id', 3)),
+        num_masks=int(episodic_cfg.get('num_masks', 1)),
+        pad_token_id=int(episodic_cfg.get('pad_token_id', 0)),
     )
 
     # Get telegram config
