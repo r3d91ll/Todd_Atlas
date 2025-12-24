@@ -25,7 +25,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from ..model.attention import GateMode
 from .retrieval_verifier import RetrievalVerifier
-from .masking import create_masked_batch, create_math_masked_batch, compute_masked_accuracy
+from .masking import create_masked_batch, compute_masked_accuracy
 
 # Import alert system (optional)
 try:
@@ -183,6 +183,8 @@ class EpisodicDDPTrainer:
             loss = lm_loss + 5x * retrieval_loss
             metrics = verifier.verify_retrieval(batch_hash, logits, memory)
     ```
+
+    Language-only mode with masked word prediction for episodic memory training.
     """
 
     def __init__(
@@ -325,7 +327,7 @@ class EpisodicDDPTrainer:
             self.data_iter = iter(self.train_dataloader)
             batch = next(self.data_iter)
 
-        # Move tensors to device, keep non-tensors as-is (e.g., task_types list)
+        # Move tensors to device, keep non-tensors as-is (e.g., task_type string)
         result = {}
         for k, v in batch.items():
             if hasattr(v, 'to'):
@@ -466,84 +468,18 @@ class EpisodicDDPTrainer:
 
     def _retrieval_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
         """
-        Execute retrieval phase step.
-
-        Routes to appropriate retrieval method based on task type:
-        - 'language': Masked word prediction (pure random masking)
-        - 'math': Modular arithmetic (answer prediction)
+        Execute retrieval phase step with masked word prediction.
 
         During retrieval:
         - Gate mode is RETRIEVAL (minimum gate floor)
         - Heavy penalty for wrong answers
-        - Track separate accuracies per task type
+        - Binary accuracy: correct word prediction from memory
         """
         if not self.ep_config.use_masked_retrieval:
             # Legacy retrieval (original behavior)
             return self._legacy_retrieval_step(batch)
 
-        # Multi-task: batch may have mixed task types
-        # task_types is a list like ['math', 'language', 'math', ...]
-        task_types = batch.get('task_types', None)
-
-        # If no task_types field, fall back to single task_type or default to language
-        if task_types is None:
-            task_type = batch.get('task_type', 'language')
-            if task_type == 'math':
-                return self._math_retrieval_step(batch)
-            else:
-                return self._language_retrieval_step(batch)
-
-        # Split batch by task type and process separately
-        batch_size = batch['input_ids'].size(0)
-        math_indices = [i for i, t in enumerate(task_types) if t == 'math']
-        lang_indices = [i for i, t in enumerate(task_types) if t == 'language']
-
-        combined_loss = 0.0
-        math_accuracy = None
-        masked_word_accuracy = None
-        total_samples = 0
-
-        # Process math samples if any
-        if math_indices:
-            math_batch = self._extract_sub_batch(batch, math_indices)
-            math_result = self._math_retrieval_step(math_batch)
-            combined_loss += math_result['loss'] * len(math_indices)
-            math_accuracy = math_result.get('math_accuracy', 0.0)
-            total_samples += len(math_indices)
-
-        # Process language samples if any
-        if lang_indices:
-            lang_batch = self._extract_sub_batch(batch, lang_indices)
-            lang_result = self._language_retrieval_step(lang_batch)
-            combined_loss += lang_result['loss'] * len(lang_indices)
-            masked_word_accuracy = lang_result.get('masked_word_accuracy', 0.0)
-            total_samples += len(lang_indices)
-
-        # Aggregate results
-        result = {
-            'loss': combined_loss / max(total_samples, 1),
-            'retrieval_loss': combined_loss / max(total_samples, 1),
-            'phase': 'retrieval',
-        }
-
-        if math_accuracy is not None:
-            result['math_accuracy'] = math_accuracy
-        if masked_word_accuracy is not None:
-            result['masked_word_accuracy'] = masked_word_accuracy
-
-        return result
-
-    def _extract_sub_batch(self, batch: Dict[str, Any], indices: list) -> Dict[str, Any]:
-        """Extract a sub-batch containing only the specified indices."""
-        sub_batch = {}
-        for k, v in batch.items():
-            if isinstance(v, torch.Tensor):
-                sub_batch[k] = v[indices]
-            elif isinstance(v, list):
-                sub_batch[k] = [v[i] for i in indices]
-            else:
-                sub_batch[k] = v
-        return sub_batch
+        return self._language_retrieval_step(batch)
 
     def _language_retrieval_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
         """
@@ -622,60 +558,6 @@ class EpisodicDDPTrainer:
             'task_type': 'language',
             'phase': 'retrieval',
             'num_masks': num_masks,
-        }
-
-    def _math_retrieval_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
-        """
-        Execute modular arithmetic retrieval.
-
-        Input: "23 + 45 = [MASK]"
-        Must output: "68" (mod 97)
-
-        Fourier/Circular geometric metrics apply to this task.
-        """
-        # Create masked version (answer always at last position)
-        masked_batch, _mask_positions, _original_tokens = create_math_masked_batch(
-            batch,
-            mask_token_id=self.ep_config.mask_token_id,
-        )
-
-        input_ids = masked_batch['input_ids'].to(self.device)
-        answers = batch['answer'].to(self.device)
-
-        with torch.autocast(device_type='cuda', dtype=self.dtype):
-            logits, self.memory_states, _ = self.model(
-                input_ids,
-                memory_states=self.memory_states,
-                return_metrics=True,
-            )
-
-            # Answer is always at last position for math
-            answer_logits = logits[:, -1, :]  # [batch, vocab]
-            predictions = answer_logits.argmax(dim=-1)  # [batch]
-
-            # Exact match accuracy
-            accuracy = (predictions == answers.squeeze(-1)).float().mean().item()
-
-            # Loss on answer position
-            if self.criterion is not None:
-                loss = self.criterion(answer_logits, answers.squeeze(-1))
-            else:
-                loss = F.cross_entropy(answer_logits, answers.squeeze(-1))
-            loss = loss * self.ep_config.retrieval_loss_weight
-
-        # Backward
-        scaled_loss = loss / self.config.gradient_accumulation_steps
-        scaled_loss.backward()
-
-        # Cache logits for stability analysis
-        self._last_logits = logits.detach()
-
-        return {
-            'loss': loss.item(),
-            'retrieval_loss': loss.item(),
-            'math_accuracy': accuracy,
-            'task_type': 'math',
-            'phase': 'retrieval',
         }
 
     def _legacy_retrieval_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, Any]:
@@ -773,8 +655,6 @@ class EpisodicDDPTrainer:
             'storage_losses': [],
             'retrieval_losses': [],
             'retrieval_accuracies': [],
-            # Multi-task separate tracking
-            'math_accuracies': [],
             'masked_word_accuracies': [],
         }
 
@@ -812,9 +692,7 @@ class EpisodicDDPTrainer:
                     metrics['retrieval_token_accuracy']
                 )
 
-            # Track multi-task accuracies separately
-            if 'math_accuracy' in metrics:
-                episode_metrics['math_accuracies'].append(metrics['math_accuracy'])
+            # Track masked word accuracy
             if 'masked_word_accuracy' in metrics:
                 episode_metrics['masked_word_accuracies'].append(metrics['masked_word_accuracy'])
 
@@ -843,24 +721,11 @@ class EpisodicDDPTrainer:
                 len(episode_metrics['retrieval_accuracies'])
             )
 
-        # Multi-task accuracies (separate tracking)
-        if episode_metrics['math_accuracies']:
-            aggregated['math_accuracy'] = (
-                sum(episode_metrics['math_accuracies']) /
-                len(episode_metrics['math_accuracies'])
-            )
-
+        # Masked word accuracy (primary accuracy metric)
         if episode_metrics['masked_word_accuracies']:
             aggregated['masked_word_accuracy'] = (
                 sum(episode_metrics['masked_word_accuracies']) /
                 len(episode_metrics['masked_word_accuracies'])
-            )
-
-        # Combined overall accuracy (50-50 weighting to match training split)
-        if episode_metrics['math_accuracies'] and episode_metrics['masked_word_accuracies']:
-            aggregated['overall_accuracy'] = (
-                aggregated['math_accuracy'] * 0.5 +
-                aggregated['masked_word_accuracy'] * 0.5
             )
 
         # Reset memory between episodes if configured
@@ -905,6 +770,7 @@ class EpisodicDDPTrainer:
             if self.global_step % self.config.grokking_interval == 0:
                 val_metrics = {
                     'retrieval_accuracy': episode_metrics.get('retrieval_accuracy_mean', 0),
+                    'masked_word_accuracy': episode_metrics.get('masked_word_accuracy', 0),
                 }
                 # Pass gate_mean for Atlas-specific gate health check
                 current_gate_mean = metrics.get('gate_mean', 1.0)
@@ -920,11 +786,11 @@ class EpisodicDDPTrainer:
                 # Log grokking phase with gate health
                 if self.global_step % self.config.log_interval == 0:
                     gate_status = "✓" if grok_metrics.gate_healthy else "⚠ COLLAPSED"
+                    masked_acc = episode_metrics.get('masked_word_accuracy', 0)
                     print(
                         f"  [Grokking] Phase: {grok_metrics.phase} | "
                         f"Gate: {current_gate_mean:.1%} {gate_status} | "
-                        f"Fourier: {grok_metrics.embedding_fourier_concentration:.3f} | "
-                        f"Circular: {grok_metrics.embedding_circular_fit:.3f}"
+                        f"Masked Acc: {masked_acc:.1%}"
                     )
             elif self._last_grokking_metrics is not None:
                 # Include last computed grokking phase in metrics
@@ -966,14 +832,15 @@ class EpisodicDDPTrainer:
             loss = metrics.get('storage_loss_mean', metrics.get('loss', 0))
             gate_mean = metrics.get('gate_mean', 0)
             collapse_risk = metrics.get('gate_collapse_risk', 0)
-            ret_acc = metrics.get('retrieval_accuracy_mean', 0)
+            # Use masked_word_accuracy as primary, fall back to legacy
+            accuracy = metrics.get('masked_word_accuracy', metrics.get('retrieval_accuracy_mean', 0))
 
             print(
                 f"[Step {self.global_step:>6}] "
                 f"Loss: {loss:.4f} | "
                 f"Gate: {gate_mean:.2%} | "
                 f"Collapse Risk: {collapse_risk:.1%} | "
-                f"Ret Acc: {ret_acc:.1%} | "
+                f"Accuracy: {accuracy:.1%} | "
                 f"Phase: {self.training_phase.value}"
             )
 
@@ -996,7 +863,7 @@ class EpisodicDDPTrainer:
 
         collapse_risk = metrics.get('gate_collapse_risk', 0)
         gate_mean = metrics.get('gate_mean', 1.0)
-        ret_acc = metrics.get('retrieval_accuracy_mean', 1.0)
+        accuracy = metrics.get('masked_word_accuracy', metrics.get('retrieval_accuracy_mean', 1.0))
         loss = metrics.get('storage_loss_mean', metrics.get('loss', 0))
 
         # Critical: Gate collapse
@@ -1018,11 +885,11 @@ class EpisodicDDPTrainer:
                 f'⚠️ Gate mean very low: {gate_mean:.1%} at step {self.global_step}'
             )
 
-        # Warning: Low retrieval accuracy
-        if ret_acc < 0.30 and ret_acc > 0:
+        # Warning: Low accuracy
+        if accuracy < 0.30 and accuracy > 0:
             self.alert_system.send_alert(
                 'WARNING',
-                f'⚠️ Retrieval accuracy low: {ret_acc:.1%} at step {self.global_step}'
+                f'⚠️ Accuracy low: {accuracy:.1%} at step {self.global_step}'
             )
 
         # Critical: Loss spike
@@ -1117,9 +984,7 @@ class EpisodicDDPTrainer:
                 if phase == "grokked":
                     print(f"\n🎯 GROKKING ACHIEVED at step {self.global_step}!")
                     print(f"   Gate mean: {self._last_grokking_metrics.gate_mean:.1%} (healthy)")
-                    print(f"   Fourier concentration: {self._last_grokking_metrics.embedding_fourier_concentration:.3f}")
-                    print(f"   Circular fit: {self._last_grokking_metrics.embedding_circular_fit:.3f}")
-                    print(f"   Effective dim ratio: {self._last_grokking_metrics.embedding_effective_dim_ratio:.1%}")
+                    print(f"   Accuracy: {episode_metrics.get('masked_word_accuracy', 0):.1%}")
                     self._flush_metrics()
                     self._save_checkpoint(is_best=True)
                     break
@@ -1130,11 +995,11 @@ class EpisodicDDPTrainer:
                         print(f"   Gate mean: {self._last_grokking_metrics.gate_mean:.1%} (below threshold)")
                         print("   Memory may be bypassed - consider adjusting gate_floor or memory learning rate")
 
-            # Track best retrieval accuracy
-            ret_acc = metrics.get('retrieval_accuracy_mean', 0)
-            is_best = ret_acc > best_retrieval_acc
+            # Track best accuracy (masked word prediction)
+            accuracy = metrics.get('masked_word_accuracy', metrics.get('retrieval_accuracy_mean', 0))
+            is_best = accuracy > best_retrieval_acc
             if is_best:
-                best_retrieval_acc = ret_acc
+                best_retrieval_acc = accuracy
 
             # Checkpoint
             if self.global_step % self.config.checkpoint_interval == 0:

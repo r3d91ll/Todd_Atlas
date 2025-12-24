@@ -1,19 +1,89 @@
 """
-Pure Random Masking for Multi-Task Episodic Memory Training.
+Word-Level Masking for Episodic Memory Training.
 
-This module implements PURE RANDOM masking with NO heuristics.
+This module implements WORD-LEVEL masking where entire words are replaced
+with a single [MASK] token, regardless of how many subword tokens they contain.
 
-Design Decision: Any heuristic becomes a learnable shortcut:
-- "Always mask 4+ char words" -> Model learns phrase completion
-- "Never mask function words" -> Model learns grammatical patterns
-- "Pure random masking" -> Model MUST use actual memory
+Design Decision: Word-level masking tests semantic memory more directly:
+- Token masking: "Did you predict '▁sum' + 'mer' correctly?" (morphology)
+- Word masking: "Did you remember the word 'summer'?" (memory)
 
-The only token we skip is padding. Everything else is fair game.
+For episodic memory, we want to test whether the model stored and retrieved
+the actual words, not whether it can guess subword patterns.
 """
 
 import torch
 import random
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, List
+from transformers import AutoTokenizer
+
+# Cache tokenizer for word boundary detection
+_tokenizer = None
+
+def _get_tokenizer():
+    """Get cached tokenizer for word boundary detection."""
+    global _tokenizer
+    if _tokenizer is None:
+        _tokenizer = AutoTokenizer.from_pretrained("google/t5-v1_1-base")
+    return _tokenizer
+
+
+def _identify_words(token_ids: torch.Tensor, pad_token_id: int = 0) -> List[List[int]]:
+    """
+    Identify word boundaries in a tokenized sequence.
+
+    T5 tokenizer uses '▁' (U+2581) prefix to mark word starts.
+    Groups consecutive tokens into words.
+
+    Args:
+        token_ids: 1D tensor of token IDs
+        pad_token_id: Padding token to skip
+
+    Returns:
+        List of words, where each word is a list of token positions
+    """
+    tokenizer = _get_tokenizer()
+    words = []
+    current_word = []
+
+    # Get the raw token strings (preserves ▁ marker)
+    token_strs = tokenizer.convert_ids_to_tokens(token_ids.tolist())
+
+    for pos, (tid, token_str) in enumerate(zip(token_ids.tolist(), token_strs)):
+        if tid == pad_token_id:
+            # End current word if any, skip padding
+            if current_word:
+                words.append(current_word)
+                current_word = []
+            continue
+
+        # Skip special tokens like </s>, <pad>
+        if token_str in ['</s>', '<pad>', '<unk>', '<s>']:
+            if current_word:
+                words.append(current_word)
+                current_word = []
+            continue
+
+        # Check if this starts a new word
+        # T5/SentencePiece uses ▁ prefix for word-initial tokens
+        is_word_start = token_str.startswith('▁')
+
+        if is_word_start and current_word:
+            # Save previous word, start new one
+            words.append(current_word)
+            current_word = [pos]
+        elif is_word_start:
+            # First word in sequence
+            current_word = [pos]
+        else:
+            # Continue current word (subword token)
+            current_word.append(pos)
+
+    # Don't forget last word
+    if current_word:
+        words.append(current_word)
+
+    return words
 
 
 def create_masked_batch(
@@ -24,86 +94,118 @@ def create_masked_batch(
     seed: Optional[int] = None,
 ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor]:
     """
-    Create masked version of batch with PURE RANDOM masking.
+    Create masked version of batch with WORD-LEVEL masking.
 
-    No heuristics. No filtering. Mask ANY token (except padding).
-    Could mask "the", "I", "compare", "summer" - anything goes.
+    Each selected word (regardless of subword token count) is replaced
+    with a SINGLE [MASK] token. The sequence is shifted and padded
+    to maintain original length.
 
     Args:
         batch: Original batch with 'input_ids' tensor [batch_size, seq_len]
         mask_token_id: Token ID to use for [MASK]
-        num_masks: Number of tokens to mask per sequence
-        pad_token_id: Only token to avoid masking
+        num_masks: Number of WORDS to mask per sequence
+        pad_token_id: Padding token ID
         seed: Optional random seed for reproducibility
 
     Returns:
         masked_batch: Batch with masks applied
-        mask_positions: [batch_size, num_masks] positions that were masked
-        original_tokens: [batch_size, num_masks] original tokens at masked positions
+        mask_positions: [batch_size, num_masks] positions of [MASK] tokens
+        original_tokens: [batch_size, num_masks] FIRST token of each masked word
+                        (used for accuracy - predicting first token of word)
     """
-    # Use local Random instance to avoid mutating global random state
     rng = random.Random(seed) if seed is not None else random.Random()
 
     input_ids = batch['input_ids'].clone()
     batch_size, seq_len = input_ids.shape
 
-    mask_positions = torch.zeros(batch_size, num_masks, dtype=torch.long)
-    original_tokens = torch.zeros(batch_size, num_masks, dtype=torch.long)
+    mask_positions = torch.full((batch_size, num_masks), -1, dtype=torch.long)
+    original_tokens = torch.full((batch_size, num_masks), -1, dtype=torch.long)
+
+    new_input_ids = torch.full_like(input_ids, pad_token_id)
 
     for i in range(batch_size):
-        # Only avoid padding - everything else is fair game
-        valid_positions = [
-            j for j in range(seq_len)
-            if input_ids[i, j].item() != pad_token_id
-        ]
+        # Identify words in this sequence
+        words = _identify_words(input_ids[i], pad_token_id)
 
-        if len(valid_positions) >= num_masks:
-            # Randomly select positions (no heuristics!)
-            selected = rng.sample(valid_positions, num_masks)
-            for k, pos in enumerate(selected):
-                mask_positions[i, k] = pos
-                original_tokens[i, k] = input_ids[i, pos].clone()
-                input_ids[i, pos] = mask_token_id
+        if len(words) < num_masks:
+            # Not enough words - mask what we can
+            words_to_mask = list(range(len(words)))
         else:
-            # Not enough valid positions - mask what we can
-            for k, pos in enumerate(valid_positions):
-                mask_positions[i, k] = pos
-                original_tokens[i, k] = input_ids[i, pos].clone()
-                input_ids[i, pos] = mask_token_id
-            # Fill remaining with -1 to indicate no mask
-            for k in range(len(valid_positions), num_masks):
-                mask_positions[i, k] = -1
-                original_tokens[i, k] = -1
+            # Randomly select words to mask
+            words_to_mask = rng.sample(range(len(words)), num_masks)
 
-    masked_batch = {**batch, 'input_ids': input_ids}
+        # Sort by position so we process left-to-right
+        words_to_mask.sort()
+
+        # Build new sequence with masks
+        new_seq = []
+        masked_word_idx = 0
+
+        for word_idx, word_positions in enumerate(words):
+            if word_idx in words_to_mask and masked_word_idx < num_masks:
+                # Replace entire word with single [MASK]
+                mask_pos = len(new_seq)
+                new_seq.append(mask_token_id)
+
+                # Record mask position and original first token
+                mask_positions[i, masked_word_idx] = mask_pos
+                original_tokens[i, masked_word_idx] = input_ids[i, word_positions[0]].item()
+                masked_word_idx += 1
+            else:
+                # Keep all tokens of this word
+                for pos in word_positions:
+                    new_seq.append(input_ids[i, pos].item())
+
+        # Copy to output tensor (truncate or pad as needed)
+        actual_len = min(len(new_seq), seq_len)
+        new_input_ids[i, :actual_len] = torch.tensor(new_seq[:actual_len], dtype=torch.long)
+
+    masked_batch = {**batch, 'input_ids': new_input_ids}
     return masked_batch, mask_positions, original_tokens
 
 
 def create_math_masked_batch(
     batch: Dict[str, torch.Tensor],
-    mask_token_id: int,
+    mask_token_id: Optional[int] = None,
 ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor]:
     """
     Create masked version for modular arithmetic.
 
-    For math, we always mask the answer position (last token before padding).
-    Input:  [a, op, b, =, answer]
-    Masked: [a, op, b, =, MASK]
+    For math, we always mask the answer position (position 4 in the sequence).
+    Input:  [a, op, b, =, answer, pad, pad, ...]
+    Masked: [a, op, b, =, MASK,   pad, pad, ...]
+
+    The math sequence format is fixed:
+        Position 0: a (first operand, offset+0 to offset+prime-1)
+        Position 1: op token (offset+prime to offset+prime+3)
+        Position 2: b (second operand, offset+0 to offset+prime-1)
+        Position 3: = token (offset+prime+4)
+        Position 4: answer (offset+0 to offset+prime-1)
+
+    IMPORTANT: Uses math-specific mask token (offset+prime+5) to keep
+    the entire sequence in the math token range. Using a language mask
+    token (like 3) confuses the model by mixing token domains.
 
     Args:
         batch: Batch with 'input_ids' and 'answer' tensors
-        mask_token_id: Token ID to use for [MASK]
+        mask_token_id: Token ID to use for [MASK]. If None, uses math-specific
+                       mask token (31102 = offset + prime + 5)
 
     Returns:
         masked_batch: Batch with answer masked
         mask_positions: [batch_size, 1] position of the answer
         original_tokens: [batch_size, 1] the correct answer
     """
+    # Use math-specific mask token by default
+    if mask_token_id is None:
+        from src.data.modular_arithmetic import ModularArithmeticDataset
+        mask_token_id = ModularArithmeticDataset.get_mask_token_id()
     input_ids = batch['input_ids'].clone()
     batch_size, seq_len = input_ids.shape
 
-    # Answer is always at the last position for math
-    answer_position = seq_len - 1
+    # Answer is always at position 4 for math (fixed format)
+    # NOT seq_len - 1, which would be wrong after padding
+    answer_position = 4
 
     mask_positions = torch.full((batch_size, 1), answer_position, dtype=torch.long)
     original_tokens = batch['answer'].clone()

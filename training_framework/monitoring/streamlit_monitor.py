@@ -410,8 +410,10 @@ monitoring:
         """)
         return
 
-    # Current grokking phase
-    st.subheader("Current Grokking Phase")
+    # ========================================
+    # SECTION 1: Primary Metrics (All Tasks)
+    # ========================================
+    st.subheader("Retrieval Accuracy & Grokking Phase")
 
     phase = latest.get('grokking/phase', 'unknown')
     phase_colors = {
@@ -419,75 +421,59 @@ monitoring:
         'circuit_formation': '🟠',
         'cleanup': '🔵',
         'grokked': '🟢',
+        'gate_collapse': '🔴',
         'unknown': '⚪',
         'insufficient_data': '⚪',
     }
     phase_icon = phase_colors.get(phase, '⚪')
 
+    # Primary metrics row
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         st.metric("Phase", f"{phase_icon} {phase}")
 
     with col2:
-        fourier = latest.get('grokking/embedding_fourier_concentration', 0)
-        st.metric("Fourier Concentration", f"{fourier:.3f}")
+        # Check for masked word accuracy (language) or math accuracy
+        lang_acc = latest.get('masked_word_accuracy', latest.get('grokking/masked_word_accuracy', 0))
+        st.metric("Masked Word Accuracy", f"{lang_acc:.1%}")
 
     with col3:
-        circular = latest.get('grokking/embedding_circular_fit', 0)
-        st.metric("Circular Fit", f"{circular:.3f}")
-
-    with col4:
         dim_ratio = latest.get('grokking/embedding_effective_dim_ratio', 0)
         st.metric("Effective Dim Ratio", f"{dim_ratio:.1%}")
 
+    with col4:
+        gate_mean = latest.get('gate_mean', 0)
+        gate_status = "✓" if gate_mean > 0.1 else "⚠"
+        st.metric("Gate Health", f"{gate_mean:.1%} {gate_status}")
+
     st.divider()
 
-    # Grokking timeline
-    st.subheader("Grokking Metrics Over Time")
+    # Retrieval accuracy over time (PRIMARY CHART)
+    st.subheader("Retrieval Accuracy Over Time")
 
-    # Prepare data
+    # Find accuracy column
+    lang_acc_col = next((c for c in ['masked_word_accuracy', 'grokking/masked_word_accuracy'] if c in df.columns), None)
+
+    if lang_acc_col:
+        fig_acc = px.line(df, x='step', y=lang_acc_col, title="Masked Word Accuracy")
+        fig_acc.add_hline(y=0.15, line_dash="dash", line_color="orange", annotation_text="Learning threshold")
+        fig_acc.add_hline(y=0.30, line_dash="dash", line_color="green", annotation_text="Memory usage")
+        fig_acc.update_layout(height=350)
+        st.plotly_chart(fig_acc, use_container_width=True)
+    else:
+        st.info("Waiting for accuracy data...")
+
+    # General grokking metrics (effective dim, memory rank, entropy)
+    st.subheader("General Grokking Metrics")
+
     grok_df = df[['step'] + grokking_cols].dropna()
 
     if not grok_df.empty:
-        # Create subplot figure
         fig = make_subplots(
-            rows=2, cols=2,
-            subplot_titles=[
-                "Fourier Concentration",
-                "Circular Fit",
-                "Effective Dim Ratio",
-                "Memory Rank"
-            ]
+            rows=1, cols=3,
+            subplot_titles=["Effective Dim Ratio", "Memory Rank", "Embedding Entropy"]
         )
-
-        # Fourier concentration
-        if 'grokking/embedding_fourier_concentration' in grok_df.columns:
-            fig.add_trace(
-                go.Scatter(
-                    x=grok_df['step'],
-                    y=grok_df['grokking/embedding_fourier_concentration'],
-                    name='Fourier',
-                    line=dict(color='blue')
-                ),
-                row=1, col=1
-            )
-            fig.add_hline(y=0.5, line_dash="dash", line_color="green",
-                         row=1, col=1, annotation_text="Target")
-
-        # Circular fit
-        if 'grokking/embedding_circular_fit' in grok_df.columns:
-            fig.add_trace(
-                go.Scatter(
-                    x=grok_df['step'],
-                    y=grok_df['grokking/embedding_circular_fit'],
-                    name='Circular',
-                    line=dict(color='purple')
-                ),
-                row=1, col=2
-            )
-            fig.add_hline(y=0.8, line_dash="dash", line_color="green",
-                         row=1, col=2, annotation_text="Target")
 
         # Effective dimensionality ratio
         if 'grokking/embedding_effective_dim_ratio' in grok_df.columns:
@@ -498,10 +484,9 @@ monitoring:
                     name='Dim Ratio',
                     line=dict(color='orange')
                 ),
-                row=2, col=1
+                row=1, col=1
             )
-            fig.add_hline(y=0.3, line_dash="dash", line_color="green",
-                         row=2, col=1, annotation_text="Target")
+            fig.add_hline(y=0.3, line_dash="dash", line_color="green", row=1, col=1)
 
         # Memory rank
         if 'grokking/memory_rank' in grok_df.columns:
@@ -510,17 +495,97 @@ monitoring:
                     x=grok_df['step'],
                     y=grok_df['grokking/memory_rank'],
                     name='Mem Rank',
-                    line=dict(color='red')
+                    line=dict(color='blue')
                 ),
-                row=2, col=2
+                row=1, col=2
             )
 
-        fig.update_layout(height=600, showlegend=False)
+        # Embedding entropy
+        if 'grokking/embedding_entropy' in grok_df.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=grok_df['step'],
+                    y=grok_df['grokking/embedding_entropy'],
+                    name='Entropy',
+                    line=dict(color='purple')
+                ),
+                row=1, col=3
+            )
+
+        fig.update_layout(height=300, showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
 
-    # Grokking interpretation
+    # ========================================
+    # SECTION 2: Math-Specific Metrics
+    # ========================================
+    st.subheader("Math-Specific Metrics (Modular Arithmetic Only)")
+
+    st.caption("These metrics detect circular/periodic structure in modular arithmetic. They are NOT meaningful for language tasks.")
+
+    # Check if we have math-specific metrics with non-zero values
+    has_fourier = 'grokking/embedding_fourier_concentration' in df.columns
+    has_circular = 'grokking/embedding_circular_fit' in df.columns
+    fourier_val = latest.get('grokking/embedding_fourier_concentration', 0)
+    circular_val = latest.get('grokking/embedding_circular_fit', 0)
+
+    # Only show if we have data and it's non-zero (math task)
+    if has_fourier or has_circular:
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.metric("Fourier Concentration", f"{fourier_val:.3f}",
+                     help="Energy in low-frequency components. Higher = more periodic structure. Only meaningful for mod-p arithmetic.")
+
+        with col2:
+            st.metric("Circular Fit", f"{circular_val:.3f}",
+                     help="How well embeddings fit a circle in 2D PCA. Only meaningful for mod-p arithmetic.")
+
+        # Show charts only if non-zero (indicates math training)
+        if fourier_val > 0.01 or circular_val > 0.01:
+            if not grok_df.empty:
+                fig = make_subplots(
+                    rows=1, cols=2,
+                    subplot_titles=["Fourier Concentration", "Circular Fit"]
+                )
+
+                if has_fourier:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=grok_df['step'],
+                            y=grok_df['grokking/embedding_fourier_concentration'],
+                            name='Fourier',
+                            line=dict(color='blue')
+                        ),
+                        row=1, col=1
+                    )
+                    fig.add_hline(y=0.5, line_dash="dash", line_color="green", row=1, col=1)
+
+                if has_circular:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=grok_df['step'],
+                            y=grok_df['grokking/embedding_circular_fit'],
+                            name='Circular',
+                            line=dict(color='purple')
+                        ),
+                        row=1, col=2
+                    )
+                    fig.add_hline(y=0.8, line_dash="dash", line_color="green", row=1, col=2)
+
+                fig.update_layout(height=300, showlegend=False)
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Fourier/Circular metrics are zero (language-only training). These will populate during math training.")
+    else:
+        st.info("Math-specific metrics not available. Enable `task_type: math` in grokking config for modular arithmetic training.")
+
+    st.divider()
+
+    # ========================================
+    # SECTION 3: Interpretation Guide
+    # ========================================
     st.subheader("Interpretation Guide")
 
     with st.expander("Understanding Grokking Metrics"):
@@ -530,57 +595,63 @@ monitoring:
 - 🟠 **Circuit Formation**: Geometric structure emerging (metrics improving)
 - 🔵 **Cleanup**: Generalization happening (retrieval accuracy jumping)
 - 🟢 **Grokked**: Stable performance + stable geometry (ready for Kakeya extraction)
+- 🔴 **Gate Collapse**: Memory pathway bypassed (gates < 10%)
 
-**Metrics:**
-- **Fourier Concentration**: Energy in low-frequency components. Higher = more periodic structure.
-- **Circular Fit**: How well embeddings fit a circle in 2D PCA. Higher = more organized geometry.
-- **Effective Dim Ratio**: Fraction of dimensions needed for 95% variance. Lower = more compressed representation.
+**General Metrics (All Tasks):**
+- **Masked Word Accuracy**: Primary metric for language episodic memory
+- **Effective Dim Ratio**: Fraction of dimensions needed for 95% variance. Lower = more compressed.
 - **Memory Rank**: Numerical rank of memory matrices. Indicates structure in learned associations.
+- **Embedding Entropy**: Organization of embedding space.
+
+**Math-Specific Metrics (Modular Arithmetic):**
+- **Fourier Concentration**: Energy in low-frequency components. Higher = more periodic structure.
+- **Circular Fit**: How well embeddings fit a circle in 2D PCA. Detects mod-p circular structure.
 
 **Targets for Grokking:**
-- Fourier Concentration > 0.5
-- Circular Fit > 0.8
 - Effective Dim Ratio < 0.3
-- Stable retrieval accuracy > 70%
+- Masked Word Accuracy > 20% (language) or > 90% (math)
+- Gate Health > 10% (memory not bypassed)
         """)
 
-    # Retrieval vs grokking correlation
-    st.subheader("Retrieval Accuracy vs Grokking")
+    # Combined accuracy + effective dim chart (general purpose)
+    st.subheader("Accuracy vs Representation Compression")
 
-    ret_acc_col = None
-    for col in ['retrieval_accuracy_mean', 'retrieval_token_accuracy']:
-        if col in df.columns:
-            ret_acc_col = col
-            break
+    # Find accuracy column
+    acc_col = next((c for c in ['masked_word_accuracy', 'grokking/masked_word_accuracy',
+                                 'math_accuracy', 'retrieval_accuracy_mean'] if c in df.columns), None)
+    dim_col = 'grokking/embedding_effective_dim_ratio' if 'grokking/embedding_effective_dim_ratio' in df.columns else None
 
-    if ret_acc_col and 'grokking/embedding_fourier_concentration' in df.columns:
-        corr_df = df[['step', ret_acc_col, 'grokking/embedding_fourier_concentration']].dropna()
+    if acc_col and dim_col:
+        fig_corr = go.Figure()
 
-        if not corr_df.empty:
-            fig_corr = go.Figure()
+        fig_corr.add_trace(go.Scatter(
+            x=df['step'],
+            y=df[acc_col],
+            name='Accuracy',
+            yaxis='y1',
+            line=dict(color='green')
+        ))
 
-            fig_corr.add_trace(go.Scatter(
-                x=corr_df['step'],
-                y=corr_df[ret_acc_col],
-                name='Retrieval Accuracy',
-                yaxis='y1'
-            ))
+        fig_corr.add_trace(go.Scatter(
+            x=df['step'],
+            y=df[dim_col],
+            name='Effective Dim Ratio',
+            yaxis='y2',
+            line=dict(color='orange', dash='dash')
+        ))
 
-            fig_corr.add_trace(go.Scatter(
-                x=corr_df['step'],
-                y=corr_df['grokking/embedding_fourier_concentration'],
-                name='Fourier Concentration',
-                yaxis='y2'
-            ))
+        fig_corr.update_layout(
+            title="Accuracy vs Effective Dimensionality (Compression)",
+            yaxis=dict(title='Accuracy', side='left', range=[0, 1]),
+            yaxis2=dict(title='Dim Ratio (lower=compressed)', side='right', overlaying='y', range=[0, 1]),
+            height=350
+        )
 
-            fig_corr.update_layout(
-                title="Retrieval Accuracy & Fourier Concentration",
-                yaxis=dict(title='Retrieval Accuracy', side='left'),
-                yaxis2=dict(title='Fourier Concentration', side='right', overlaying='y'),
-                height=400
-            )
+        st.plotly_chart(fig_corr, use_container_width=True)
 
-            st.plotly_chart(fig_corr, use_container_width=True)
+        st.caption("When accuracy rises AND dim ratio falls, the model is developing compressed, generalizing representations.")
+    else:
+        st.info("Waiting for accuracy and dimensionality metrics...")
 
 
 # === Page: Numerical Stability ===

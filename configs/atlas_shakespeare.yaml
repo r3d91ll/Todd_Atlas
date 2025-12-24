@@ -36,7 +36,7 @@ model:
 training:
   max_steps: 100000     # Safety limit - training stops on grokking detection
   learning_rate: 3e-4
-  weight_decay: 0.1
+  weight_decay: 0.05              # Small regularization for generalization
   warmup_steps: 500
   grad_clip: 1.0
 
@@ -69,25 +69,15 @@ episodic:
   retrieval_gate_floor: 0.30
 
   retrieval_loss_weight: 5.0
-  storage_loss_weight: 1.0
+  storage_loss_weight: 5.0        # Equal weighting with retrieval for balanced LM learning
 
   reset_memory_between_episodes: false
 
   # Multi-task masked word prediction (NEW)
   use_masked_retrieval: true    # Enable masked word prediction for retrieval
-  mask_token_id: 3              # Token ID for [MASK] (unused token slot)
-  num_masks: 1                  # Number of masks per sequence (start with 1)
+  mask_token_id: 4              # Within vocab range (32000), unused token slot
+  num_masks: 13                 # ~10% word masking (~13 words per ~130 words in 512 tokens)
   pad_token_id: 0               # Padding token ID (skip when masking)
-
-# Multi-task training: Domain Universality Test (NEW)
-# Tests whether grokking is domain-universal or domain-specific
-# 50-50 split between language (masked word) and math (modular arithmetic)
-multi_task:
-  enabled: true
-  math_fraction: 0.5          # 50-50 split for Phase 1 (prove concept)
-  random_ordering: true       # Random within episodes, NOT blocks
-  math_prime: 97              # Modulus for modular arithmetic
-  math_operation: "add"       # Start with addition
 
 monitoring:
   dashboard_enabled: true
@@ -101,10 +91,11 @@ monitoring:
     track_memory_matrices: true  # Analyze memory W matrices
     track_hidden_states: true    # Analyze layer outputs
 
-    # Thresholds for grokking detection
-    fourier_concentration_target: 0.5   # Higher = more structured
-    circular_fit_target: 0.8            # Higher = more circular
+    # Thresholds for grokking detection (language-only)
+    # Uses masked word accuracy + gate health + effective dimensionality
     effective_dim_ratio_target: 0.3     # Lower = more compressed
+    min_gate_mean: 0.1                  # Gate collapse threshold
+    min_retrieval_accuracy: 0.5         # Minimum accuracy for grokking
 
   # Numerical stability (arXiv:2501.04697v2)
   # Detects Softmax Collapse (SC) and Naïve Loss Minimization (NLM)
@@ -116,12 +107,12 @@ monitoring:
 
     # StableMax: Numerically stable softmax alternative
     # Prevents floating-point absorption that causes gradient death
-    use_stablemax: true
+    use_stablemax: false  # DISABLED - testing if this causes embedding collapse
 
     # ⊥Grad: Orthogonal gradient projection
     # Projects out weight-aligned gradients for immediate generalization
-    use_orthogonal_grad: true
-    orthogonal_grad_strength: 1.0  # 0.0 = disabled, 1.0 = full projection
+    use_orthogonal_grad: false  # DISABLED - any amount causes embedding collapse
+    orthogonal_grad_strength: 0.0
 
   alerts:
     gate_collapse_risk:

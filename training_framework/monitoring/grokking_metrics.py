@@ -34,6 +34,10 @@ class GrokkingConfig:
     track_memory_matrices: bool = True
     track_hidden_states: bool = True
 
+    # Task type: "math" or "language"
+    # Circular/Fourier metrics only meaningful for math (modular arithmetic)
+    task_type: str = "language"  # Skip circular/fourier for language-only training
+
     # Thresholds for phase detection
     fourier_concentration_target: float = 0.5
     circular_fit_target: float = 0.8
@@ -52,10 +56,8 @@ class GrokkingMetrics:
     """Container for grokking-related metrics."""
     step: int = 0
 
-    # Multi-task accuracies (NEW: separate tracking for domain universality test)
-    math_accuracy: float = 0.0           # Modular arithmetic accuracy
-    masked_word_accuracy: float = 0.0    # Language masked word accuracy
-    overall_accuracy: float = 0.0        # Combined (50-50 weighted)
+    # Accuracy metrics
+    masked_word_accuracy: float = 0.0    # Language masked word accuracy (primary metric)
 
     # Embedding metrics (computed on MATH embeddings when available)
     # NOTE: Fourier/Circular are meaningless for natural language embeddings
@@ -90,22 +92,20 @@ class GrokkingMetrics:
         """Convert to dictionary for logging."""
         return {
             "step": self.step,
-            # Multi-task accuracies
-            "grokking/math_accuracy": self.math_accuracy,
+            # Accuracy
             "grokking/masked_word_accuracy": self.masked_word_accuracy,
-            "grokking/overall_accuracy": self.overall_accuracy,
-            # Geometric metrics (meaningful for MATH task only)
+            # Embedding metrics (Fourier/Circular still logged for dashboard, not used for phase detection)
             "grokking/embedding_fourier_concentration": self.embedding_fourier_concentration,
             "grokking/embedding_circular_fit": self.embedding_circular_fit,
             "grokking/embedding_effective_dim": self.embedding_effective_dim,
             "grokking/embedding_effective_dim_ratio": self.embedding_effective_dim_ratio,
             "grokking/embedding_entropy": self.embedding_entropy,
+            # Memory metrics
             "grokking/memory_fourier_concentration": self.memory_fourier_concentration,
             "grokking/memory_effective_dim": self.memory_effective_dim,
             "grokking/memory_effective_dim_ratio": self.memory_effective_dim_ratio,
             "grokking/memory_rank": self.memory_rank,
-            "grokking/hidden_effective_dim": self.hidden_effective_dim,
-            "grokking/hidden_entropy": self.hidden_entropy,
+            # Atlas-specific
             "grokking/gate_mean": self.gate_mean,
             "grokking/gate_healthy": self.gate_healthy,
             "grokking/phase": self.phase,
@@ -167,27 +167,26 @@ class GrokkingDetector:
         metrics.gate_mean = gate_mean
         metrics.gate_healthy = gate_mean >= self.config.min_gate_mean
 
-        # Multi-task accuracies (NEW: track separately for domain universality test)
+        # Track masked word accuracy (primary metric for language-only training)
         if task_metrics:
-            metrics.math_accuracy = task_metrics.get('math_accuracy', 0.0)
             metrics.masked_word_accuracy = task_metrics.get('masked_word_accuracy', 0.0)
-            # Combined with 50-50 weighting (matches training split)
-            if metrics.math_accuracy > 0 or metrics.masked_word_accuracy > 0:
-                metrics.overall_accuracy = (
-                    metrics.math_accuracy * 0.5 +
-                    metrics.masked_word_accuracy * 0.5
-                )
+        if val_metrics:
+            # Fallback to retrieval_accuracy if masked_word_accuracy not in task_metrics
+            if metrics.masked_word_accuracy == 0:
+                metrics.masked_word_accuracy = val_metrics.get('masked_word_accuracy', 0.0)
 
         with torch.no_grad():
             # 1. Embedding metrics
             # NOTE: Fourier/Circular only meaningful for MATH embeddings
-            # For language, these will be noise, but we compute them anyway
-            # and use math_accuracy for phase detection
+            # Skip them for language-only training (task_type == "language")
             if self.config.track_embeddings:
                 embeddings = self._get_embeddings(model)
                 if embeddings is not None:
-                    metrics.embedding_fourier_concentration = self._fourier_concentration(embeddings)
-                    metrics.embedding_circular_fit = self._circular_fit(embeddings)
+                    # Only compute circular/fourier for math tasks
+                    if self.config.task_type == "math":
+                        metrics.embedding_fourier_concentration = self._fourier_concentration(embeddings)
+                        metrics.embedding_circular_fit = self._circular_fit(embeddings)
+                    # Always compute effective dim and entropy (meaningful for all tasks)
                     metrics.embedding_effective_dim = self._effective_dimensionality(embeddings)
                     metrics.embedding_effective_dim_ratio = metrics.embedding_effective_dim / embeddings.shape[1]
                     metrics.embedding_entropy = self._embedding_entropy(embeddings)
@@ -204,7 +203,9 @@ class GrokkingDetector:
 
                     # Average across layers
                     if layer_metrics:
-                        metrics.memory_fourier_concentration = np.mean([m["fourier_concentration"] for m in layer_metrics])
+                        # Only include fourier for math tasks
+                        if self.config.task_type == "math":
+                            metrics.memory_fourier_concentration = np.mean([m["fourier_concentration"] for m in layer_metrics])
                         metrics.memory_effective_dim = np.mean([m["effective_dim"] for m in layer_metrics])
                         metrics.memory_effective_dim_ratio = np.mean([m["effective_dim_ratio"] for m in layer_metrics])
                         metrics.memory_rank = np.mean([m["effective_rank"] for m in layer_metrics])
@@ -469,68 +470,53 @@ class GrokkingDetector:
         """
         Detect current grokking phase based on metrics and trends.
 
-        Multi-Task Phase Detection:
-        - Uses MATH accuracy for phase detection (Fourier/Circular are meaningful here)
-        - Language accuracy tracked separately but not used for phase
+        Language-Only Phase Detection:
+        - Uses masked_word_accuracy as primary signal
         - Requires healthy gate values (gate_mean > min_gate_mean)
+        - Uses effective dimensionality trends instead of Fourier/Circular
 
         Phases:
-        - memorization: High train acc, low val/retrieval acc, low structure
-        - circuit_formation: Structure metrics (Fourier/Circular) increasing
-        - cleanup: Math accuracy jumping up
-        - grokked: Stable high math performance + stable structure + healthy gates
+        - memorization: Low accuracy, learning basic patterns
+        - circuit_formation: Accuracy improving, effective dim decreasing
+        - cleanup: High accuracy, stable metrics
+        - grokked: Stable high accuracy + healthy gates
         """
         if len(self.history) < self.config.trend_window:
             return "insufficient_data"
 
         recent = list(self.history)[-self.config.trend_window:]
 
-        # Compute trends (Fourier/Circular meaningful for MATH, noise for language)
-        fourier_trend = self._compute_trend([m.embedding_fourier_concentration for m in recent])
-        circular_trend = self._compute_trend([m.embedding_circular_fit for m in recent])
-        # dim_trend reserved for future use
-        _dim_trend = self._compute_trend([m.embedding_effective_dim_ratio for m in recent])
+        # Compute trends (effective dim is meaningful for all tasks)
+        dim_trend = self._compute_trend([m.embedding_effective_dim_ratio for m in recent])
+        accuracy_trend = self._compute_trend([m.masked_word_accuracy for m in recent])
 
-        # Multi-task: Use MATH accuracy as primary grokking signal
-        # Fourier/Circular are meaningful for mod arithmetic, not language
-        # masked_word_accuracy tracked separately but not used for phase detection
-        math_acc = 0.0
-        if task_metrics:
-            math_acc = task_metrics.get("math_accuracy", 0)
+        # Get masked word accuracy (primary metric)
+        masked_acc = metrics.masked_word_accuracy
+        if masked_acc == 0 and task_metrics:
+            masked_acc = task_metrics.get("masked_word_accuracy", 0)
 
         # Fallback to legacy retrieval accuracy
         retrieval_acc = val_metrics.get("retrieval_accuracy", 0) if val_metrics else 0
-        train_acc = train_metrics.get("accuracy", 0) if train_metrics else 0
-        val_acc = val_metrics.get("accuracy", 0) if val_metrics else 0
-
-        # Phase detection logic
-        structure_improving = (fourier_trend > 0.001 or circular_trend > 0.001)
-        structure_stable = abs(fourier_trend) < 0.0001 and abs(circular_trend) < 0.0001
 
         # Atlas-specific: Check gate health
         gate_healthy = metrics.gate_healthy
 
-        # Use MATH accuracy for grokking detection (where Fourier/Circular are meaningful)
-        # High math accuracy = geometric structure learned
-        high_math = math_acc > 0.9  # 90% math accuracy = clear grokking
-        high_retrieval = retrieval_acc > self.config.min_retrieval_accuracy
-
-        # Geometric structure thresholds
-        high_structure = (
-            metrics.embedding_fourier_concentration > self.config.fourier_concentration_target and
-            metrics.embedding_circular_fit > self.config.circular_fit_target
-        )
+        # Phase detection thresholds
+        high_accuracy = masked_acc > 0.5 or retrieval_acc > self.config.min_retrieval_accuracy
+        very_high_accuracy = masked_acc > 0.7
+        accuracy_stable = abs(accuracy_trend) < 0.001
+        dim_decreasing = dim_trend < -0.001  # Representations compressing
 
         # ATLAS REQUIREMENT: Must have healthy gates to be considered "grokked"
         # If gates collapsed, memory is bypassed and model hasn't truly grokked
-        if (high_math or high_retrieval) and high_structure and structure_stable and gate_healthy:
+        if very_high_accuracy and accuracy_stable and gate_healthy:
             return "grokked"
         elif not gate_healthy:
             # Gate collapse - model is bypassing memory, stuck in attention-only mode
             return "gate_collapse"
-        elif high_math or high_retrieval:
+        elif high_accuracy:
             return "cleanup"
-        elif structure_improving:
+        elif dim_decreasing or accuracy_trend > 0.001:
             return "circuit_formation"
         else:
             return "memorization"
@@ -561,10 +547,11 @@ class GrokkingDetector:
         return {
             "step": latest.step,
             "phase": latest.phase,
-            "embedding_fourier": latest.embedding_fourier_concentration,
-            "embedding_circular": latest.embedding_circular_fit,
+            "masked_word_accuracy": latest.masked_word_accuracy,
             "embedding_dim_ratio": latest.embedding_effective_dim_ratio,
             "memory_rank": latest.memory_rank,
+            "gate_mean": latest.gate_mean,
+            "gate_healthy": latest.gate_healthy,
             "has_grokked": self.has_grokked(),
             "measurements": len(self.history),
         }
@@ -580,6 +567,7 @@ def create_grokking_detector(config_dict: Dict) -> GrokkingDetector:
         track_embeddings=grok_config.get("track_embeddings", True),
         track_memory_matrices=grok_config.get("track_memory_matrices", True),
         track_hidden_states=grok_config.get("track_hidden_states", True),
+        task_type=grok_config.get("task_type", "language"),  # "math" or "language"
         fourier_concentration_target=grok_config.get("fourier_concentration_target", 0.5),
         circular_fit_target=grok_config.get("circular_fit_target", 0.8),
         effective_dim_ratio_target=grok_config.get("effective_dim_ratio_target", 0.3),
