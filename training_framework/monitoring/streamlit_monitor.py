@@ -83,10 +83,63 @@ def compute_rolling_stats(df: pd.DataFrame, column: str, window: int = 100) -> p
     return df[column].rolling(window=window, min_periods=1).mean()
 
 
+# === Phase Indicator Helper ===
+def render_phase_indicator(phase: str) -> None:
+    """Render a color-coded phase indicator."""
+    phase_config = {
+        "memory_learning": {
+            "color": "#3498db",  # Blue
+            "icon": "🔵",
+            "description": "Model is actively learning (loss decreasing, accuracy increasing)",
+        },
+        "converged": {
+            "color": "#2ecc71",  # Green
+            "icon": "🟢",
+            "description": "Metrics have plateaued - training has converged",
+        },
+        "overfitting": {
+            "color": "#f39c12",  # Orange
+            "icon": "🟠",
+            "description": "Train/val gap growing - model is overfitting",
+        },
+        "grokking": {
+            "color": "#9b59b6",  # Purple
+            "icon": "🟣",
+            "description": "Val accuracy recovering, representations stabilizing",
+        },
+        "unknown": {
+            "color": "#95a5a6",  # Gray
+            "icon": "⚪",
+            "description": "Insufficient data for phase detection",
+        },
+    }
+
+    config = phase_config.get(phase, phase_config["unknown"])
+
+    st.markdown(f"""
+        <div style="
+            background: {config['color']};
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            color: white;
+            margin-bottom: 10px;
+        ">
+            <h3 style="margin: 0;">{config['icon']} Phase: {phase.upper().replace('_', ' ')}</h3>
+            <p style="margin: 5px 0 0 0; font-size: 0.9em; opacity: 0.9;">{config['description']}</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+
 # === Page 1: Live Training Overview ===
 def page_live_overview(df: pd.DataFrame, latest: Dict[str, Any]):
     """Live training overview page."""
     st.title("🚀 Live Training Overview")
+
+    # Phase indicator at top (if phase detection enabled)
+    detected_phase = latest.get('detected_phase', None)
+    if detected_phase:
+        render_phase_indicator(detected_phase)
 
     # Top metrics row
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -812,6 +865,245 @@ After 100% train accuracy, gradients align with weight direction:
         """)
 
 
+# === Page: Phase Detection ===
+def page_phase_detection(df: pd.DataFrame, latest: Dict[str, Any]):
+    """Phase detection and train/val comparison page."""
+    st.title("📊 Phase Detection")
+
+    # Check if phase detection is enabled
+    if 'detected_phase' not in df.columns and 'detected_phase' not in latest:
+        st.warning("Phase detection not enabled in training config.")
+        st.info("""
+To enable phase detection, add to your config:
+```yaml
+training:
+  validation_ratio: 0.15
+  validation_interval: 500
+  phase_detection_enabled: true
+```
+        """)
+        return
+
+    # Current phase indicator
+    st.subheader("Current Training Phase")
+    detected_phase = latest.get('detected_phase', 'unknown')
+    render_phase_indicator(detected_phase)
+
+    st.divider()
+
+    # Train vs Validation comparison
+    st.subheader("Train vs Validation Accuracy")
+
+    has_val = 'val_accuracy' in df.columns
+    has_train = 'masked_word_accuracy' in df.columns or 'train_accuracy' in df.columns
+
+    if has_train and has_val:
+        train_col = 'masked_word_accuracy' if 'masked_word_accuracy' in df.columns else 'train_accuracy'
+
+        # Current metrics
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            train_acc = latest.get(train_col, 0)
+            st.metric("Train Accuracy", f"{train_acc:.1%}")
+
+        with col2:
+            val_acc = latest.get('val_accuracy', 0)
+            st.metric("Val Accuracy", f"{val_acc:.1%}")
+
+        with col3:
+            gap = train_acc - val_acc
+            gap_color = "normal" if gap < 0.1 else "inverse"
+            st.metric("Train-Val Gap", f"{gap:+.1%}", delta_color=gap_color)
+
+        # Accuracy comparison chart
+        fig_acc = go.Figure()
+
+        # Filter to rows with validation data
+        val_df = df[df['val_accuracy'].notna()].copy() if 'val_accuracy' in df.columns else df
+
+        fig_acc.add_trace(go.Scatter(
+            x=val_df['step'],
+            y=val_df[train_col],
+            name='Train Accuracy',
+            line=dict(color='blue')
+        ))
+
+        if 'val_accuracy' in val_df.columns:
+            fig_acc.add_trace(go.Scatter(
+                x=val_df['step'],
+                y=val_df['val_accuracy'],
+                name='Val Accuracy',
+                line=dict(color='orange')
+            ))
+
+        fig_acc.update_layout(
+            title="Train vs Validation Accuracy Over Time",
+            yaxis=dict(title='Accuracy', range=[0, 1]),
+            height=400,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02)
+        )
+
+        st.plotly_chart(fig_acc, use_container_width=True)
+
+        # Overfitting gap trend
+        st.subheader("Overfitting Gap Trend")
+
+        if 'val_accuracy' in val_df.columns:
+            val_df['gap'] = val_df[train_col] - val_df['val_accuracy']
+
+            fig_gap = px.line(val_df, x='step', y='gap', title="Train-Val Gap Over Time")
+            fig_gap.add_hline(y=0, line_dash="solid", line_color="gray")
+            fig_gap.add_hline(y=0.1, line_dash="dash", line_color="orange",
+                             annotation_text="Warning: Gap > 10%")
+            fig_gap.add_hline(y=0.2, line_dash="dash", line_color="red",
+                             annotation_text="Critical: Gap > 20%")
+            fig_gap.update_layout(height=300)
+            st.plotly_chart(fig_gap, use_container_width=True)
+    else:
+        st.info("Validation metrics not available. Enable validation split in training config.")
+
+    st.divider()
+
+    # Phase detection metrics
+    st.subheader("Phase Detection Metrics")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # Loss comparison
+        if 'train_loss' in df.columns or 'storage_loss_mean' in df.columns:
+            loss_col = 'train_loss' if 'train_loss' in df.columns else 'storage_loss_mean'
+
+            fig_loss = go.Figure()
+
+            fig_loss.add_trace(go.Scatter(
+                x=df['step'],
+                y=df[loss_col],
+                name='Train Loss',
+                line=dict(color='blue')
+            ))
+
+            if 'val_loss' in df.columns:
+                val_df = df[df['val_loss'].notna()]
+                fig_loss.add_trace(go.Scatter(
+                    x=val_df['step'],
+                    y=val_df['val_loss'],
+                    name='Val Loss',
+                    line=dict(color='orange')
+                ))
+
+            fig_loss.update_layout(
+                title="Train vs Validation Loss",
+                yaxis=dict(title='Loss'),
+                height=300
+            )
+            st.plotly_chart(fig_loss, use_container_width=True)
+
+    with col2:
+        # Effective dimension ratio
+        if 'grokking/embedding_effective_dim_ratio' in df.columns:
+            fig_dim = px.line(
+                df[df['grokking/embedding_effective_dim_ratio'].notna()],
+                x='step',
+                y='grokking/embedding_effective_dim_ratio',
+                title="Effective Dimension Ratio"
+            )
+            fig_dim.add_hline(y=0.3, line_dash="dash", line_color="green",
+                             annotation_text="Grokking threshold")
+            fig_dim.update_layout(height=300)
+            st.plotly_chart(fig_dim, use_container_width=True)
+        else:
+            st.info("Effective dimension metrics not available.")
+
+    st.divider()
+
+    # Phase transition history
+    st.subheader("Phase Transition History")
+
+    # Look for phase transitions in the data
+    if 'detected_phase' in df.columns:
+        phase_df = df[['step', 'detected_phase']].dropna()
+
+        if not phase_df.empty:
+            # Detect transitions
+            phase_df['prev_phase'] = phase_df['detected_phase'].shift(1)
+            transitions = phase_df[phase_df['detected_phase'] != phase_df['prev_phase']].copy()
+
+            if not transitions.empty:
+                transitions = transitions[['step', 'prev_phase', 'detected_phase']].rename(
+                    columns={'prev_phase': 'From', 'detected_phase': 'To'}
+                )
+
+                st.dataframe(transitions, use_container_width=True)
+
+                # Timeline visualization
+                phase_colors = {
+                    'memory_learning': 'blue',
+                    'converged': 'green',
+                    'overfitting': 'orange',
+                    'grokking': 'purple',
+                    'unknown': 'gray'
+                }
+
+                fig_timeline = go.Figure()
+
+                for phase, color in phase_colors.items():
+                    phase_steps = phase_df[phase_df['detected_phase'] == phase]['step']
+                    if not phase_steps.empty:
+                        fig_timeline.add_trace(go.Scatter(
+                            x=phase_steps,
+                            y=[phase] * len(phase_steps),
+                            mode='markers',
+                            name=phase.replace('_', ' ').title(),
+                            marker=dict(color=color, size=8)
+                        ))
+
+                fig_timeline.update_layout(
+                    title="Phase Timeline",
+                    xaxis_title="Step",
+                    yaxis_title="Phase",
+                    height=250
+                )
+                st.plotly_chart(fig_timeline, use_container_width=True)
+            else:
+                st.info("No phase transitions detected yet.")
+        else:
+            st.info("No phase detection data available yet.")
+    else:
+        st.info("Phase detection data not found in metrics.")
+
+    st.divider()
+
+    # Interpretation guide
+    with st.expander("Understanding Phase Detection"):
+        st.markdown("""
+**Training Phases:**
+
+- 🔵 **Memory Learning**: Model is actively learning
+  - Loss is decreasing OR accuracy is increasing
+  - Healthy gradient signals
+
+- 🟢 **Converged**: Training has plateaued
+  - Low variance in metrics over convergence window
+  - May be at any accuracy level
+
+- 🟠 **Overfitting**: Train/val gap is growing
+  - Train accuracy increasing while val accuracy decreases
+  - Consider early stopping or more regularization
+
+- 🟣 **Grokking**: Generalization breakthrough
+  - Val accuracy recovering after overfitting period
+  - Effective dimension stabilizing
+  - Model has learned generalizing representations
+
+**Key Thresholds:**
+- Convergence: Variance < 0.001 over 2000 steps
+- Overfitting: Train-val gap growing at > 0.001 per step
+- Grokking: Val accuracy improves > 5% with stable eff_dim
+        """)
+
+
 # === Main App ===
 def main():
     # Parse arguments
@@ -860,7 +1152,7 @@ def main():
     # Page selection
     page = st.sidebar.radio(
         "Page",
-        ["Live Overview", "Memory Deep Dive", "Grokking & Geometry", "Numerical Stability", "Alerts & Health"]
+        ["Live Overview", "Phase Detection", "Memory Deep Dive", "Grokking & Geometry", "Numerical Stability", "Alerts & Health"]
     )
 
     st.sidebar.markdown("---")
@@ -870,6 +1162,8 @@ def main():
     # Render selected page
     if page == "Live Overview":
         page_live_overview(df, latest)
+    elif page == "Phase Detection":
+        page_phase_detection(df, latest)
     elif page == "Memory Deep Dive":
         page_memory_deep_dive(df, latest)
     elif page == "Grokking & Geometry":

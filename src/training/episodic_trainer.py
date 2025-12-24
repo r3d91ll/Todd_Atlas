@@ -55,6 +55,18 @@ try:
 except ImportError:
     STABILITY_AVAILABLE = False
 
+# Import phase detector (optional)
+try:
+    from training_framework.phase_detector import (
+        PhaseDetector,
+        PhaseDetectorConfig,
+        TrainingPhase as DetectedPhase,
+        create_phase_detector,
+    )
+    PHASE_DETECTOR_AVAILABLE = True
+except ImportError:
+    PHASE_DETECTOR_AVAILABLE = False
+
 # Import StableMax loss (arXiv:2501.04697v2)
 try:
     from .stablemax import StableCrossEntropyLoss
@@ -163,6 +175,12 @@ class TrainerConfig:
     use_orthogonal_grad: bool = True
     orthogonal_grad_strength: float = 1.0  # 0.0 = disabled, 1.0 = full projection
 
+    # Validation and phase detection
+    validation_ratio: float = 0.0  # 0.0 = no validation split, 0.15 = 15% for validation
+    validation_interval: int = 500  # Evaluate on validation set every N steps
+    phase_detection_enabled: bool = False  # Enable phase detection (requires validation)
+    phase_checkpoint_dir: str = ""  # Directory for phase transition checkpoints (default: checkpoint_dir)
+
 
 class EpisodicDDPTrainer:
     """
@@ -193,6 +211,7 @@ class EpisodicDDPTrainer:
         train_dataloader: DataLoader,
         config: TrainerConfig,
         metrics_adapter: Optional[Any] = None,
+        val_dataloader: Optional[DataLoader] = None,
     ):
         self.config = config
         self.ep_config = config.episodic
@@ -309,6 +328,33 @@ class EpisodicDDPTrainer:
         if STABILITY_AVAILABLE and config.grokking_enabled:  # Use same flag as grokking
             self.stability_monitor = NumericalStabilityMonitor()
             print("Numerical stability monitoring enabled")
+
+        # Validation dataloader (optional)
+        self.val_dataloader = val_dataloader
+        self.val_data_iter = iter(val_dataloader) if val_dataloader is not None else None
+        self._last_val_metrics = None
+        if val_dataloader is not None:
+            print(f"Validation enabled (interval: {config.validation_interval} steps)")
+
+        # Phase detector (optional)
+        self.phase_detector = None
+        self._last_phase = None
+        if PHASE_DETECTOR_AVAILABLE and config.phase_detection_enabled:
+            phase_config = PhaseDetectorConfig(
+                convergence_window=2000,
+                stability_window=1000,
+                overfitting_window=500,
+                variance_threshold=0.001,
+            )
+            self.phase_detector = PhaseDetector(phase_config)
+            # Register callback for phase transitions
+            self.phase_detector.register_callback(self._on_phase_transition)
+            print("Phase detection enabled")
+        elif config.phase_detection_enabled and not PHASE_DETECTOR_AVAILABLE:
+            print("Warning: Phase detection requested but not available")
+
+        # Phase checkpoint directory
+        self.phase_checkpoint_dir = config.phase_checkpoint_dir or config.checkpoint_dir
 
         # Initialize gate floor
         self._update_gate_floor()
@@ -645,6 +691,159 @@ class EpisodicDDPTrainer:
 
         return {'grad_norm': grad_norm.item()}
 
+    def _get_val_batch(self) -> Optional[Dict[str, torch.Tensor]]:
+        """Get next batch from validation dataloader."""
+        if self.val_dataloader is None:
+            return None
+
+        try:
+            batch = next(self.val_data_iter)
+        except StopIteration:
+            self.val_data_iter = iter(self.val_dataloader)
+            batch = next(self.val_data_iter)
+
+        # Move tensors to device
+        result = {}
+        for k, v in batch.items():
+            if hasattr(v, 'to'):
+                result[k] = v.to(self.device)
+            else:
+                result[k] = v
+        return result
+
+    @torch.no_grad()
+    def evaluate_validation(self, num_batches: int = 10) -> Dict[str, float]:
+        """
+        Evaluate model on validation set.
+
+        Args:
+            num_batches: Number of validation batches to evaluate
+
+        Returns:
+            Dictionary with validation metrics (val_loss, val_accuracy)
+        """
+        if self.val_dataloader is None:
+            return {}
+
+        self.model.eval()
+        val_losses = []
+        val_accuracies = []
+
+        # Save current memory state to restore after validation
+        saved_memory_states = self.memory_states
+
+        for _ in range(num_batches):
+            batch = self._get_val_batch()
+            if batch is None:
+                break
+
+            # Create masked version for masked word prediction
+            masked_batch, mask_positions, original_tokens = create_masked_batch(
+                batch,
+                mask_token_id=self.ep_config.mask_token_id,
+                num_masks=self.ep_config.num_masks,
+                pad_token_id=self.ep_config.pad_token_id,
+            )
+
+            input_ids = masked_batch['input_ids'].to(self.device)
+            mask_positions = mask_positions.to(self.device)
+            original_tokens = original_tokens.to(self.device)
+
+            with torch.autocast(device_type='cuda', dtype=self.dtype):
+                logits, _, _ = self.model(
+                    input_ids,
+                    memory_states=self.memory_states,
+                    return_metrics=True,
+                )
+
+                batch_size = logits.size(0)
+                num_masks = self.ep_config.num_masks
+
+                # Gather logits at masked positions
+                masked_logits_list = []
+                for k in range(num_masks):
+                    pos = mask_positions[:, k].clamp(min=0)
+                    ml = logits[torch.arange(batch_size, device=self.device), pos, :]
+                    masked_logits_list.append(ml)
+
+                masked_logits = torch.stack(masked_logits_list, dim=1)
+                predictions = masked_logits.argmax(dim=-1)
+
+                # Compute accuracy
+                accuracy = compute_masked_accuracy(predictions, original_tokens, mask_positions)
+
+                # Compute loss
+                loss = F.cross_entropy(
+                    masked_logits.view(-1, masked_logits.size(-1)),
+                    original_tokens.view(-1),
+                    ignore_index=-1,
+                )
+
+            val_losses.append(loss.item())
+            val_accuracies.append(accuracy)
+
+        # Restore memory state and training mode
+        self.memory_states = saved_memory_states
+        self.model.train()
+
+        if not val_losses:
+            return {}
+
+        val_metrics = {
+            'val_loss': sum(val_losses) / len(val_losses),
+            'val_accuracy': sum(val_accuracies) / len(val_accuracies),
+        }
+        self._last_val_metrics = val_metrics
+        return val_metrics
+
+    def _on_phase_transition(self, transition) -> None:
+        """Callback for phase transitions - saves checkpoint."""
+        print(f"\n📊 Phase Transition at step {transition.step}:")
+        print(f"   {transition.from_phase.value} → {transition.to_phase.value}")
+        print(f"   Reason: {transition.reason}")
+
+        # Save phase transition checkpoint
+        self._save_phase_checkpoint(transition)
+
+        # Send alert if available
+        if self.alert_system:
+            self.alert_system.send_alert(
+                'INFO',
+                f'📊 Phase transition at step {transition.step}:\n'
+                f'{transition.from_phase.value} → {transition.to_phase.value}\n'
+                f'Reason: {transition.reason}'
+            )
+
+    def _save_phase_checkpoint(self, transition) -> None:
+        """Save checkpoint at phase transition."""
+        os.makedirs(self.phase_checkpoint_dir, exist_ok=True)
+
+        model = self._get_raw_model()
+        checkpoint = {
+            'step': self.global_step,
+            'episode': self.total_episodes,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict(),
+            'training_phase': self.training_phase.value,
+            'detected_phase': transition.to_phase.value,
+            'phase_transition': transition.to_dict(),
+            'config': {
+                'trainer': self.config.__dict__,
+                'episodic': self.ep_config.__dict__,
+            },
+        }
+
+        # Generate descriptive checkpoint name
+        phase_name = transition.to_phase.value
+        acc = transition.metrics_snapshot.get('train_accuracy', 0)
+        eff_dim = transition.metrics_snapshot.get('effective_dim_ratio', 0)
+        filename = f"{phase_name}_step_{self.global_step}_acc_{acc:.3f}_effdim_{eff_dim:.3f}.pt"
+
+        path = os.path.join(self.phase_checkpoint_dir, filename)
+        torch.save(checkpoint, path)
+        print(f"   Saved phase checkpoint: {path}")
+
     def _run_episode(self) -> Dict[str, Any]:
         """
         Run one complete episode (storage + retrieval cycle).
@@ -822,6 +1021,59 @@ class EpisodicDDPTrainer:
             elif self._last_stability_metrics is not None:
                 # Include last computed stability risk in metrics
                 metrics['stability/sc_risk'] = self._last_stability_metrics.sc_risk
+
+        # Validation metrics (computed at interval)
+        if self.val_dataloader is not None:
+            if self.global_step % self.config.validation_interval == 0:
+                val_metrics = self.evaluate_validation()
+                metrics.update(val_metrics)
+
+                if self.global_step % self.config.log_interval == 0:
+                    val_acc = val_metrics.get('val_accuracy', 0)
+                    val_loss = val_metrics.get('val_loss', 0)
+                    train_acc = episode_metrics.get('masked_word_accuracy', 0)
+                    gap = train_acc - val_acc
+                    print(
+                        f"  [Validation] Val Acc: {val_acc:.1%} | "
+                        f"Val Loss: {val_loss:.4f} | "
+                        f"Train-Val Gap: {gap:+.1%}"
+                    )
+            elif self._last_val_metrics is not None:
+                # Include last validation metrics
+                metrics.update(self._last_val_metrics)
+
+        # Phase detection (update with all metrics)
+        if self.phase_detector is not None:
+            # Prepare metrics for phase detector
+            phase_metrics = {
+                'train_accuracy': episode_metrics.get('masked_word_accuracy', 0),
+                'train_loss': episode_metrics.get('storage_loss_mean', 0),
+                'loss': episode_metrics.get('storage_loss_mean', 0),
+            }
+
+            # Add validation metrics if available
+            if self._last_val_metrics:
+                phase_metrics['val_accuracy'] = self._last_val_metrics.get('val_accuracy', 0)
+                phase_metrics['val_loss'] = self._last_val_metrics.get('val_loss', 0)
+
+            # Add effective dim ratio if available
+            if self._last_grokking_metrics:
+                phase_metrics['effective_dim_ratio'] = self._last_grokking_metrics.embedding_effective_dim_ratio
+
+            # Add stability metrics if available
+            if self._last_stability_metrics:
+                phase_metrics['grad_weight_cosine'] = self._last_stability_metrics.grad_weight_cosine
+
+            # Add gate mean
+            phase_metrics['gate_mean'] = metrics.get('gate_mean', 1.0)
+
+            # Update phase detector
+            detected_phase = self.phase_detector.update(self.global_step, phase_metrics)
+            metrics['detected_phase'] = detected_phase.value
+
+            # Log phase if changed
+            if self.phase_detector.phase_changed:
+                self._last_phase = detected_phase
 
         return metrics
 
