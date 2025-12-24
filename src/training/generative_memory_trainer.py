@@ -450,12 +450,23 @@ def main():
     parser = argparse.ArgumentParser(description="Stage 3 Generative Memory Training")
     parser.add_argument('--config', type=str, required=True,
                         help="Path to config YAML")
-    parser.add_argument('--stage1-checkpoint', type=str, required=True,
-                        help="Path to Stage 1 converged checkpoint")
+    parser.add_argument('--stage1-checkpoint', type=str, default=None,
+                        help="Path to Stage 1 converged checkpoint (required for new training)")
+    parser.add_argument('--resume', type=str, default=None,
+                        help="Path to Stage 3 checkpoint to resume training from")
     parser.add_argument('--output-dir', type=str, default=None,
                         help="Output directory (default: from config)")
 
     args = parser.parse_args()
+
+    # Validate arguments
+    if not args.resume and not args.stage1_checkpoint:
+        parser.error("Either --stage1-checkpoint (for new training) or --resume (to continue) is required")
+
+    if args.resume:
+        resume_path = Path(args.resume)
+        if not resume_path.exists():
+            parser.error(f"Resume checkpoint not found: {resume_path}")
 
     # Load config
     with open(args.config) as f:
@@ -512,8 +523,12 @@ def main():
         corpus_sentences=sentences,
         config=trainer_config,
         checkpoint_dir=output_dir,
-        stage1_checkpoint=Path(args.stage1_checkpoint),
+        stage1_checkpoint=Path(args.stage1_checkpoint) if args.stage1_checkpoint else None,
     )
+
+    # Resume from Stage 3 checkpoint if specified
+    if args.resume:
+        trainer.resume_checkpoint(Path(args.resume))
 
     # Train
     trainer.train()
