@@ -85,14 +85,58 @@ monitoring:
     orthogonal_grad_strength: 1.0
 ```
 
-**Fix:** Disable both StableMax and PerpGrad for language training:
-```yaml
-monitoring:
-  stability:
-    use_stablemax: false
-    use_orthogonal_grad: false
-    orthogonal_grad_strength: 0.0
-```
+**Fix:** Disable StableMax. PerpGrad may work at reduced strength (see below).
+
+---
+
+### Failure Mode 2: Systematic StableMax/PerpGrad Analysis (December 2024)
+
+After initial collapse, we performed systematic isolation testing to identify the true root cause.
+
+**Critical Discovery:** Our initial testing was flawed - we tested PerpGrad at various strengths but ALWAYS with StableMax enabled. We never isolated the variables properly.
+
+**Corrected Testing Sequence:**
+
+| Test | StableMax | PerpGrad | Eff Dim @ 1.5k | Result |
+|------|-----------|----------|----------------|--------|
+| 1-6 | ON | 1.0 → 0.01 | <1% | Collapse |
+| 7 | ON | **OFF** | <1% | **Still collapsed** |
+| 8 | OFF | OFF | 44% @ 5k | Success |
+| 9 | OFF | 1.0 | 5-9% | Slow collapse |
+| 10 | OFF | 0.5 | (testing) | TBD |
+
+**Key Insight from Test 7:** StableMax ON + PerpGrad OFF still collapsed, proving **StableMax was the sole cause** of the catastrophic collapse, not PerpGrad.
+
+**Key Insight from Test 9:** PerpGrad at 1.0 without StableMax causes a slower, less severe collapse:
+- Shakespeare: 85% → 28% → 5% (by step 2000)
+- Dumas: 86% → 84% → 42% → 9% (by step 2000)
+
+**The `grad_weight_cosine` Metric Tells the Story:**
+
+| Config | grad_weight_cosine | Meaning | Eff Dim Result |
+|--------|-------------------|---------|----------------|
+| StableMax ON | 0.0 (forced) | No weight-aligned learning | Catastrophic (<1%) |
+| PerpGrad 1.0, StableMax OFF | 0.0 (forced) | No weight-aligned learning | Slow collapse (5-9%) |
+| Both OFF | Natural (varies) | Normal gradient flow | Healthy (44%+) |
+| PerpGrad 0.5, StableMax OFF | ~0.5 (partial) | Some weight-aligned learning | TBD |
+
+**Why Language Models Need Weight-Aligned Gradients:**
+
+For language tasks, the model needs to reinforce learned patterns by allowing some gradient signal to align with existing weights. When `grad_weight_cosine = 0`:
+- The model cannot strengthen useful patterns it has discovered
+- Embedding space collapses because it can't build on prior learning
+- This is different from math tasks where the solution space is more constrained
+
+**Hypothesis for PerpGrad Sweet Spot:**
+- PerpGrad 1.0: Too aggressive - starves model of reinforcement signal
+- PerpGrad 0.5: May allow enough weight-aligned learning while still regularizing
+- PerpGrad 0.0: No regularization benefit, but stable training
+
+**Conclusion:**
+1. **StableMax**: Caused catastrophic collapse in Atlas episodic setup - may interact poorly with memory architecture
+2. **PerpGrad**: May be usable at reduced strength (0.3-0.5) - testing ongoing
+3. **Monitor `grad_weight_cosine`**: If stuck at 0.0, model is being starved of learning signal
+4. **Context matters**: These findings are specific to our experimental setup - test empirically in other contexts
 
 ---
 
@@ -242,36 +286,44 @@ General training parameters that affect learning, including grokking behavior.
 
 ### 6. Numerical Stability (StableMax / PerpGrad)
 
-**WARNING**: These techniques from grokking literature cause embedding collapse for language tasks.
+**Updated Understanding (December 2024):** After systematic isolation testing, we now have nuanced findings.
 
-| Parameter | Current Value | Effect |
-|-----------|---------------|--------|
-| `use_stablemax` | **false** | DISABLED - causes embedding collapse for language |
-| `use_orthogonal_grad` | **false** | DISABLED - any strength causes collapse |
-| `orthogonal_grad_strength` | 0.0 | N/A when disabled |
+| Parameter | Recommendation | Notes |
+|-----------|----------------|-------|
+| `use_stablemax` | **false** (always) | Sole cause of catastrophic collapse |
+| `use_orthogonal_grad` | **true** (with reduced strength) | Works without StableMax |
+| `orthogonal_grad_strength` | **0.3-0.5** | 1.0 too aggressive, 0.0 loses benefit |
 
-**Findings (December 2024)**:
+**StableMax (problematic in our setup):**
+- In Atlas episodic training, causes catastrophic collapse (<1% eff dim) within 1500 steps
+- Collapse occurs even with PerpGrad completely disabled
+- The root cause of all initial collapse experiments
+- *Note: May work in other architectures/tasks - our finding is specific to Atlas + episodic memory*
 
-These techniques are designed for math/modular arithmetic tasks where:
-- Outputs are discrete and unambiguous
-- The solution space is highly constrained
-- Compression leads to finding optimal circuits
+**PerpGrad (Usable with care):**
+- At 1.0: Forces `grad_weight_cosine = 0`, causing slow collapse (5-9% eff dim)
+- At 0.5: Allows some weight-aligned learning (testing ongoing)
+- At 0.0: No regularization, but stable training
 
-For language tasks:
-- **StableMax**: Modifies softmax in ways that crush embedding diversity
-- **PerpGrad**: Projects out gradients needed for learning rich representations
-- **Both**: Cause effective dimensionality to crash from 78% to <1% within 1500 steps
+**The `grad_weight_cosine` Diagnostic:**
+```
+grad_weight_cosine = 0.0  → Model starved of reinforcement signal → Collapse
+grad_weight_cosine > 0.3  → Healthy gradient flow → Stable training
+```
 
-**Recommendation for Language Tasks**:
+**Why This Matters for Language:**
+Language models need to reinforce learned patterns. Unlike math (discrete solutions), language requires building rich, high-dimensional representations through iterative refinement. Zero weight-aligned gradients prevent this refinement.
+
+**Recommended Configuration for Atlas Episodic Training:**
 ```yaml
 monitoring:
   stability:
-    use_stablemax: false
-    use_orthogonal_grad: false
-    orthogonal_grad_strength: 0.0
+    use_stablemax: false           # Caused collapse in our setup
+    use_orthogonal_grad: true      # Can enable with reduced strength
+    orthogonal_grad_strength: 0.5  # Allow 50% weight-aligned gradients
 ```
 
-**For Math Tasks** (modular arithmetic, etc.): May still be beneficial - test empirically
+**For Math Tasks** (modular arithmetic, etc.): Both may work at full strength - test empirically
 
 ---
 
@@ -380,7 +432,9 @@ When evaluating next run, focus on:
 
 1. **Task type matters**: Grokking techniques from math papers don't directly apply to language
 2. **Monitor effective dim ratio**: Below 10% early = collapse, not grokking
-3. **StableMax is dangerous for language**: Caused immediate embedding collapse
-4. **PerpGrad at any strength caused collapse** for language tasks
-5. **Patience pays off**: Accuracy plateau at 10% for 13k steps before grokking began
-6. **Cross-lingual consistency**: Both English (Shakespeare) and French (Dumas) showed similar trajectories
+3. **StableMax caused collapse in our setup**: May interact poorly with episodic memory architecture
+4. **PerpGrad is nuanced**: Works at reduced strength (0.3-0.5), collapses at 1.0
+5. **Monitor `grad_weight_cosine`**: If stuck at 0.0, model is starved of learning signal
+6. **Isolate variables when debugging**: Our initial tests conflated StableMax and PerpGrad effects
+7. **Patience pays off**: Accuracy plateau at 10% for 13k steps before grokking began
+8. **Cross-lingual consistency**: Both English (Shakespeare) and French (Dumas) showed similar trajectories

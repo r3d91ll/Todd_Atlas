@@ -111,8 +111,8 @@ monitoring:
 
     # ⊥Grad: Orthogonal gradient projection
     # Projects out weight-aligned gradients for immediate generalization
-    use_orthogonal_grad: false  # DISABLED - any amount causes embedding collapse
-    orthogonal_grad_strength: 0.0
+    use_orthogonal_grad: true   # Testing: StableMax OFF + PerpGrad 0.5
+    orthogonal_grad_strength: 0.5
 
   alerts:
     gate_collapse_risk:
