@@ -142,3 +142,41 @@ With the balanced tokenizer:
 3. Training dynamics should be more similar across languages
 4. If gaps persist, they reflect actual linguistic/structural differences
 
+---
+
+## Critical Confound: Literary Format Mismatch
+
+### Previous Comparison (Shakespeare vs Dumas)
+| Aspect | Shakespeare | Dumas |
+|--------|-------------|-------|
+| Language | English | French |
+| Format | **Theatrical plays** | **Prose novels** |
+| Structure | Verse, dialogue, stage directions | Narrative, description |
+| Era | 1590-1613 | 1840s-1870s |
+
+**Problem**: Two variables changing simultaneously:
+1. Language (EN vs FR)
+2. Literary format (plays vs novels)
+
+Cannot isolate which variable causes observed differences.
+
+### Next Comparison (Shakespeare vs de Vega)
+| Aspect | Shakespeare | de Vega |
+|--------|-------------|---------|
+| Language | English | Spanish |
+| Format | **Theatrical plays** | **Theatrical plays** |
+| Structure | Verse, dialogue, stage directions | Verse, dialogue, stage directions |
+| Era | 1590-1613 | 1580-1635 (Siglo de Oro) |
+
+**Improvement**: Literary format is now CONTROLLED
+- Both are theatrical plays from the same era
+- Both use verse/poetry structure
+- Both are dialogue-heavy with stage directions
+- Both follow similar dramatic conventions
+
+**Result**: Any remaining differences can be attributed to:
+1. Language (English vs Spanish)
+2. Cultural interpretation of shared concepts (love, honor, death, etc.)
+
+This is the proper experimental design for cross-linguistic Kakeya set comparison.
+
