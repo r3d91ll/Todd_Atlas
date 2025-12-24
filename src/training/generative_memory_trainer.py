@@ -460,6 +460,9 @@ def main():
     args = parser.parse_args()
 
     # Validate arguments
+    if args.stage1_checkpoint and args.resume:
+        parser.error("Options --stage1-checkpoint and --resume are mutually exclusive")
+
     if not args.resume and not args.stage1_checkpoint:
         parser.error("Either --stage1-checkpoint (for new training) or --resume (to continue) is required")
 
