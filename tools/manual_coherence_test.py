@@ -117,7 +117,8 @@ def generate_continuation(
         for _ in range(max_new_tokens):
             # Forward pass
             outputs = model(generated)
-            logits = outputs['logits'] if isinstance(outputs, dict) else outputs
+            # Atlas.forward returns (logits, memory_states, metrics) tuple
+            logits = outputs[0] if isinstance(outputs, tuple) else outputs
 
             # Get next token probabilities
             next_logits = logits[:, -1, :] / temperature

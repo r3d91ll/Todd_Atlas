@@ -13,6 +13,7 @@ making memory an active part of the creative process, not just retrieval.
 """
 
 import json
+import math
 import random
 import time
 from pathlib import Path
@@ -23,9 +24,33 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import LambdaLR
 
 import zstandard as zstd
+
+
+def get_cosine_schedule_with_warmup(optimizer, warmup_steps: int, total_steps: int, min_lr_ratio: float = 0.1):
+    """
+    Create a scheduler with linear warmup followed by cosine annealing.
+
+    Args:
+        optimizer: The optimizer to schedule
+        warmup_steps: Number of warmup steps
+        total_steps: Total number of training steps
+        min_lr_ratio: Minimum learning rate as ratio of initial LR
+
+    Returns:
+        LambdaLR scheduler
+    """
+    def lr_lambda(step: int) -> float:
+        if step < warmup_steps:
+            # Linear warmup
+            return step / max(1, warmup_steps)
+        # Cosine annealing
+        progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
+        return max(min_lr_ratio, 0.5 * (1 + math.cos(math.pi * progress)))
+
+    return LambdaLR(optimizer, lr_lambda)
 
 
 @dataclass
@@ -104,10 +129,11 @@ class GenerativeMemoryTrainer:
             lr=config.learning_rate,
             weight_decay=config.weight_decay,
         )
-        self.scheduler = CosineAnnealingLR(
+        self.scheduler = get_cosine_schedule_with_warmup(
             self.optimizer,
-            T_max=config.max_steps,
-            eta_min=config.learning_rate * 0.1,
+            warmup_steps=config.warmup_steps,
+            total_steps=config.max_steps,
+            min_lr_ratio=0.1,
         )
 
         # Metrics tracking
@@ -202,7 +228,8 @@ class GenerativeMemoryTrainer:
         with torch.no_grad():
             for _ in range(max_tokens):
                 outputs = self.model(generated)
-                logits = outputs['logits'] if isinstance(outputs, dict) else outputs
+                # Atlas.forward returns (logits, memory_states, metrics) tuple
+                logits = outputs[0] if isinstance(outputs, tuple) else outputs
 
                 # Get next token logits
                 next_logits = logits[:, -1, :] / self.config.temperature
@@ -258,7 +285,8 @@ class GenerativeMemoryTrainer:
         # Forward pass (training mode for dropout etc.)
         self.model.train()
         outputs = self.model(tokens[:, :-1])
-        logits = outputs['logits'] if isinstance(outputs, dict) else outputs
+        # Atlas.forward returns (logits, memory_states, metrics) tuple
+        logits = outputs[0] if isinstance(outputs, tuple) else outputs
 
         # Language modeling loss
         targets = tokens[:, 1:]

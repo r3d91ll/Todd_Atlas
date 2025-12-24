@@ -30,9 +30,9 @@ model:
   vocab_size: 29153        # Pruned mT5 tokenizer (88% reduction from 250K)
   max_seq_len: 512
 
-  # Omega memory config (scaled to d_model)
-  d_key: 64
-  d_value: 64
+  # Omega memory config (must match d_model per AtlasConfig constraints)
+  d_key: 128
+  d_value: 128
   poly_degree: 2
   context_window: 16
   init_alpha: 0.99
@@ -109,7 +109,7 @@ episodic:
 
   # Multi-task masked word prediction
   use_masked_retrieval: true
-  mask_token_id: 4                # <unk> token in pruned tokenizer
+  mask_token_id: 2                # <unk> token ID in pruned mT5 tokenizer
   num_masks: 52                   # 10% of max_seq_len (512), rounded up
   pad_token_id: 0
 
