@@ -223,7 +223,7 @@ def run_validation_session(
     print(f"Samples evaluated: {len(ratings)}")
     print(f"Average rating: {avg_rating:.2f}/5")
     print(f"Pass rate (>=4): {pass_rate:.1%}")
-    print(f"Threshold: 80%")
+    print("Threshold: 80%")
     print(f"Status: {'PASSED' if pass_rate >= 0.80 else 'FAILED'}")
 
     # Save results
@@ -307,7 +307,7 @@ def main():
         return 1
 
     # Run validation
-    pass_rate, results = run_validation_session(
+    pass_rate, _results = run_validation_session(
         model, tokenizer, device, sentences,
         n_samples=args.n_samples,
         output_path=output_path,
@@ -321,7 +321,7 @@ def main():
         print("Ready to proceed to Stage 3!")
         return 0
     else:
-        print(f"\nStage 2 FAILED - continue Stage 1 training")
+        print("\nStage 2 FAILED - continue Stage 1 training")
         return 1
 
 

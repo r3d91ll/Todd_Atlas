@@ -142,11 +142,21 @@ class GenerativeMemoryTrainer:
         self.generation_memory: List[Dict] = []  # Store (prompt, generation) pairs
 
     def load_checkpoint(self, checkpoint_path: Path):
-        """Load model from Stage 1 checkpoint."""
+        """Load model from Stage 1 checkpoint (model weights only)."""
         print(f"Loading Stage 1 checkpoint: {checkpoint_path}")
         checkpoint = torch.load(checkpoint_path, map_location=self.device)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         print("  Stage 1 weights loaded successfully")
+
+    def resume_checkpoint(self, checkpoint_path: Path):
+        """Resume training from a Stage 3 checkpoint (full state)."""
+        print(f"Resuming from Stage 3 checkpoint: {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        self.step = checkpoint.get('step', 0)
+        print(f"  Resumed at step {self.step}")
 
     def save_checkpoint(self, prefix: str = "stage3"):
         """Save training checkpoint."""
